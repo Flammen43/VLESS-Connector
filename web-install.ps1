@@ -1,4 +1,4 @@
-﻿<#
+<#
     Бутстрап для установки одной командой:
 
         irm https://raw.githubusercontent.com/Flammen43/VLESS-Connector/main/web-install.ps1 | iex

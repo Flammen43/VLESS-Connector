@@ -87,7 +87,22 @@ pytest
 
 ### Шаг 1: Скачать проект
 
-Скачайте ZIP архив или клонируйте через Git:
+**Способ A — готовый архив (рекомендуется).** Возьмите ZIP под свою платформу
+на странице [последнего релиза](https://github.com/Flammen43/VLESS-Connector/releases/latest)
+и распакуйте:
+
+| Платформа | Архив |
+|---|---|
+| Windows x64 | `vlesschrome-win-x64-*.zip` |
+| Linux x64 | `vlesschrome-linux-x64-*.zip` |
+| Linux ARM64 | `vlesschrome-linux-arm64-*.zip` |
+| macOS Apple Silicon | `vlesschrome-macos-arm64-*.zip` |
+| macOS Intel | `vlesschrome-macos-x64-*.zip` |
+
+Внутри уже лежит Xray-core и гео-базы, поэтому установка идёт без сети
+и шаг с загрузкой Xray пропускается.
+
+**Способ B — клонировать репозиторий.** Нужен git; Xray установщик скачает сам:
 
 ```bash
 git clone https://github.com/Flammen43/VLESS-Connector.git

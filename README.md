@@ -1,4 +1,4 @@
-# VLESS Chrome Extension
+﻿# VLESS Chrome Extension
 
 Chrome расширение для подключения к VLESS прокси через 3X-UI сервер. Работает только в Chrome, изолируя трафик браузера от остальных приложений.
 
@@ -87,7 +87,26 @@ pytest
 
 ### Шаг 1: Скачать проект
 
-**Способ A — готовый архив (рекомендуется).** Возьмите ZIP под свою платформу
+**Способ A — одна команда (рекомендуется).** Скачает релиз под вашу
+платформу и сразу запускает установку — шаг 2 выполнять не нужно.
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/Flammen43/VLESS-Connector/main/web-install.ps1 | iex
+```
+
+Linux и macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Flammen43/VLESS-Connector/main/web-install.sh | bash
+```
+
+Проект ляжет в `%LOCALAPPDATA%\Programs\VLESS-Connector` или
+`~/.local/share/VLESS-Connector`. Если GitHub недоступен — укажите зеркало
+через переменную `VLESSCHROME_BASE`.
+
+**Способ B — готовый архив вручную.** Возьмите ZIP под свою платформу
 на странице [последнего релиза](https://github.com/Flammen43/VLESS-Connector/releases/latest)
 и распакуйте:
 
@@ -102,7 +121,7 @@ pytest
 Внутри уже лежит Xray-core и гео-базы, поэтому установка идёт без сети
 и шаг с загрузкой Xray пропускается.
 
-**Способ B — клонировать репозиторий.** Нужен git; Xray установщик скачает сам:
+**Способ C — клонировать репозиторий.** Нужен git; Xray установщик скачает сам:
 
 ```bash
 git clone https://github.com/Flammen43/VLESS-Connector.git

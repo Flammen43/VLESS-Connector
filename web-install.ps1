@@ -52,14 +52,28 @@ if ($env:VLESSCHROME_BASE) {
 # ─── [2/4] Загрузка ──────────────────────────────────────────
 Write-Step "[2/4] Загрузка архива..."
 $zip = Join-Path ([IO.Path]::GetTempPath()) "vless-connector-$([guid]::NewGuid().ToString('N')).zip"
-try {
-    $pref = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
-    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
-    $ProgressPreference = $pref
-} catch {
-    Write-Fail "не удалось скачать: $($_.Exception.Message)"
-    exit 1
+# Загрузка на 30+ МБ регулярно рвётся на полпути. Invoke-WebRequest в PS 5.1
+# не умеет повторять сам, поэтому цикл. Докачки нет — качаем заново.
+$pref = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+$downloaded = $false
+foreach ($attempt in 1..4) {
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
+        $downloaded = $true
+        break
+    } catch {
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        if ($attempt -eq 4) {
+            $ProgressPreference = $pref
+            Write-Fail "не удалось скачать: $($_.Exception.Message)"
+            exit 1
+        }
+        Write-Host "  попытка $attempt не удалась, повтор..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds ($attempt * 2)
+    }
 }
+$ProgressPreference = $pref
+if (-not $downloaded) { Write-Fail "не удалось скачать"; exit 1 }
 Write-Ok "$([math]::Round((Get-Item $zip).Length/1MB,1)) МБ"
 
 # ─── [3/4] Распаковка ────────────────────────────────────────

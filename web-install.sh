@@ -78,7 +78,9 @@ step "[3/5] Загрузка архива..."
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 ZIP="$TMP/release.zip"
-curl -fL --progress-bar -o "$ZIP" "$URL" || { fail "не удалось скачать"; exit 1; }
+# 20+ МБ по неровному каналу регулярно рвётся на полпути, поэтому повторы;
+# -C - докачивает с места обрыва, а не начинает заново.
+curl -fL --progress-bar --retry 5 --retry-delay 2 --retry-all-errors \n     -C - -o "$ZIP" "$URL" || { fail "не удалось скачать"; exit 1; }
 ok "$(du -h "$ZIP" | cut -f1)"
 
 # ─── [4/5] Распаковка ────────────────────────────────────

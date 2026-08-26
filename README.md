@@ -90,8 +90,8 @@ pytest
 Скачайте ZIP архив или клонируйте через Git:
 
 ```bash
-git clone https://github.com/yourusername/vlesschrome.git
-cd vlesschrome
+git clone https://github.com/Flammen43/VLESS-Connector.git
+cd VLESS-Connector
 ```
 
 ### Шаг 2: Установка

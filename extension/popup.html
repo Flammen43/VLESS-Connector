@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VLESS Chrome Connector</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="header">
+    <h1>VLESS Connector</h1>
+    <span class="header-brand">IT Pumpagroup with ❤</span>
+  </div>
+
+  <div class="content">
+    <!-- Форма ввода (первый запуск, нет профилей) -->
+    <div id="configInput" class="form-group">
+      <div class="profile-type-tabs" id="firstConnectTypeTabs">
+        <button type="button" class="profile-type-tab active" data-type="vless">VLESS</button>
+        <button type="button" class="profile-type-tab" data-type="wireguard">WireGuard</button>
+      </div>
+      <label for="vlessUrl" id="firstConnectLabel">VLESS URL</label>
+      <div class="input-wrapper">
+        <textarea
+          id="vlessUrl"
+          placeholder="vless://uuid@server:port?security=tls&type=tcp#name"
+          rows="3"
+        ></textarea>
+        <button id="pasteBtn" class="paste-btn" title="Вставить из буфера">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          Вставить
+        </button>
+      </div>
+      <p class="form-hint" id="firstConnectHint">Получите URL от администратора VPN</p>
+      <div class="file-import-row hidden" id="firstConnectFileRow">
+        <input type="file" id="firstConnectFile" accept=".conf,.config,text/plain" hidden>
+        <button type="button" id="firstConnectFileBtn" class="file-import-btn">Загрузить .conf</button>
+      </div>
+      <div class="btn-row">
+        <button id="connectBtn" class="btn btn-primary">Подключить</button>
+      </div>
+    </div>
+
+    <!-- Вид с профилями (после добавления хотя бы одного) -->
+    <div id="profilesView" class="hidden">
+      <div class="profiles-header">
+        <span class="profiles-title">Профили</span>
+        <button id="addProfileBtn" class="add-profile-btn" title="Добавить профиль">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 5v14"></path>
+            <path d="M5 12h14"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Форма добавления/редактирования профиля (скрыта, выезжает) -->
+      <div id="profileForm" class="profile-form">
+        <div class="profile-form-inner">
+          <div class="profile-type-tabs" id="profileFormTypeTabs">
+            <button type="button" class="profile-type-tab active" data-type="vless">VLESS</button>
+            <button type="button" class="profile-type-tab" data-type="wireguard">WireGuard</button>
+          </div>
+          <label for="profileFormUrl" id="profileFormLabel">VLESS URL</label>
+          <div class="input-wrapper">
+            <textarea
+              id="profileFormUrl"
+              placeholder="vless://uuid@server:port?security=tls&type=tcp#name"
+              rows="3"
+            ></textarea>
+            <button id="profileFormPasteBtn" class="paste-btn" title="Вставить из буфера">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              Вставить
+            </button>
+          </div>
+          <div class="file-import-row hidden" id="profileFormFileRow">
+            <input type="file" id="profileFormFile" accept=".conf,.config,text/plain" hidden>
+            <button type="button" id="profileFormFileBtn" class="file-import-btn">Загрузить .conf</button>
+          </div>
+          <div class="profile-form-actions">
+            <button id="profileFormCancelBtn" class="btn btn-secondary">Отмена</button>
+            <button id="profileFormSaveBtn" class="btn btn-primary">Добавить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="profileList" class="profile-list"></div>
+
+      <div class="connection-card">
+        <button id="toggleBtn" class="toggle-button" disabled title="Сначала добавьте профиль"
+                aria-label="Подключить VPN" aria-pressed="false">
+          <div class="toggle-ring"></div>
+          <div class="toggle-inner">
+            <svg class="power-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v10"></path>
+              <path d="M18.4 6.6a9 9 0 1 1-12.77.04"></path>
+            </svg>
+          </div>
+        </button>
+        <div class="connection-meta">
+          <div id="toggleStatus" class="toggle-status">Отключено</div>
+          <div class="connection-rows">
+            <span class="conn-label">Сервер</span>
+            <span id="serverInfo" class="conn-value">—</span>
+            <span class="conn-label">Время</span>
+            <span id="uptime" class="conn-value">—</span>
+          </div>
+        </div>
+      </div>
+
+      <label class="route-option" for="routeRuDirect">
+        <input type="checkbox" id="routeRuDirect">
+        <span class="route-option-text">
+          <span class="route-option-title">Российские сайты — напрямую</span>
+          <span class="route-option-hint">Мимо VPN, ваш реальный IP</span>
+        </span>
+      </label>
+    </div>
+
+    <div id="errorMessage" class="error-message hidden" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

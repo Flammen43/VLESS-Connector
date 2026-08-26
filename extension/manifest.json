@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "VLESS Chrome Connector",
+  "version": "1.1.0",
+  "description": "VLESS и WireGuard прокси для Chrome с автоматическим управлением Xray",
+  "permissions": [
+    "proxy",
+    "storage",
+    "nativeMessaging",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwaodcrzT9EkT/lptc+yd4cjxZMoXD5s4zpXQOwsGjOOECUnTwT9hV22Z7GMC8hZN74q/q1lw52H95rXt8lhFDGhMJVIPQJgQ/PKwPgjCZMCXZip7DMYJiYFoZQ2Tix94t3NfJJbsohLcs9c+OvznFVCdkw6/J0D6y2caYUKW3pRw4A/3nqxIx+yvNlRtY3M8mYBfiZBmI86LqmmmbS90eEHEoW+Mk74h1AKccgzDS+v4ti55LjI2Z8mi4VL2zODSKaKT0UzhD2CP1ClOvTN4hP6TMuVCLWcN53bgzIWmRj1xvxAWLK7+CGMxoAJnd3deh+/pN5rK/ew4G5U9HF1XdQIDAQAB"
+}

@@ -1,0 +1,6 @@
+psutil>=5.9.0
+# Шифрование секретов at rest (см. dpapi_store.py). Опционально: если
+# keyring не находит рабочий secret-бэкенд (headless/SSH без D-Bus),
+# native host тихо откатывается на plaintext-хранение вместо падения.
+keyring>=24.0.0
+cryptography>=41.0.0

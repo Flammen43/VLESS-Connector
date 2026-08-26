@@ -1,0 +1,9 @@
+{
+  "name": "com.vlesschrome.host",
+  "description": "VLESS Chrome Native Messaging Host",
+  "path": "native-host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://lnpifiepccjepkhcohgahghhgfehikie/"
+  ]
+}

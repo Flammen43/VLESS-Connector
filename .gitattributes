@@ -1,0 +1,23 @@
+# Концы строк. Критично для кроссплатформенного проекта: shell-скрипт с CRLF
+# на Linux и macOS падает с «bad interpreter: /bin/bash^M». На Windows
+# core.autocrlf обычно true, и без этих правил git подставил бы CRLF при
+# checkout, а редакторы и скрипты — при сохранении.
+
+# По умолчанию git сам решает, что текст, и нормализует к LF в репозитории.
+* text=auto
+
+# Всегда LF — эти файлы исполняются в Unix-окружении.
+*.sh            text eol=lf
+*.py            text eol=lf
+
+# Всегда CRLF — их выполняет cmd.exe/PowerShell в Windows.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Бинарники не трогать.
+*.exe           binary
+*.dat           binary
+*.png           binary
+*.zip           binary
+*.pem           binary

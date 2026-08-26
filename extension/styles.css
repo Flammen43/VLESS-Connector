@@ -1,0 +1,955 @@
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f4f6f9;
+  --bg-card: #f9fafb;
+  --text: #1a1a2e;
+  /* Контраст на белом: secondary 7.5:1, muted 4.76:1 — оба проходят WCAG AA
+     для мелкого текста (4.5:1). Иерархия text > secondary > muted сохранена. */
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --accent: #667eea;
+  --accent-dark: #764ba2;
+  --accent-glow: rgba(102, 126, 234, 0.35);
+  --green: #10b981;
+  --green-glow: rgba(16, 185, 129, 0.35);
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-card: #1e293b;
+    --text: #e2e8f0;
+    /* Контраст на #0f172a: secondary 12.1:1, muted 7.0:1 — оба проходят AA. */
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --border: #334155;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  width: 380px;
+  min-height: 200px;
+  /* Chrome отводит popup ровно 600px по высоте — занижать нет смысла. */
+  max-height: 600px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body::-webkit-scrollbar {
+  width: 4px;
+}
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+/* ======================== HEADER ======================== */
+.header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 7px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.header-brand {
+  font-size: 9px;
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+/* ======================== CONTENT ======================== */
+.content {
+  padding: 14px;
+}
+
+/* ======================== FORM (first launch) ======================== */
+.form-group {
+  animation: fadeSlideIn 0.3s ease;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.form-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.input-wrapper {
+  position: relative;
+}
+
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  /* Кнопка «Вставить» ~79px + отступ 8px справа: текст не должен под неё заезжать. */
+  padding-right: 92px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+  resize: vertical;
+  background: var(--bg-card);
+  color: var(--text);
+  transition: border-color 0.2s;
+  line-height: 1.5;
+}
+
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.paste-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.paste-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.paste-btn.pasted {
+  background: var(--green);
+  color: white;
+  border-color: var(--green);
+}
+
+.file-import-row {
+  margin-top: 8px;
+}
+
+.file-import-btn {
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  width: 100%;
+  transition: all 0.2s;
+}
+
+.file-import-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(102, 126, 234, 0.08);
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ======================== BUTTONS ======================== */
+.btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  flex: 1;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+
+.btn-secondary {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--border);
+}
+
+/* ======================== PROFILES HEADER ======================== */
+.profiles-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.profiles-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.add-profile-btn {
+  background: transparent;
+  border: 1.5px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.add-profile-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(102, 126, 234, 0.08);
+}
+
+/* ======================== PROFILE TYPE TABS ======================== */
+.profile-type-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.profile-type-tab {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.profile-type-tab:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.profile-type-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: transparent;
+  color: white;
+}
+
+.profile-type-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  margin-right: 6px;
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+}
+
+.profile-type-badge.vless {
+  background: rgba(102, 126, 234, 0.15);
+  color: var(--accent);
+}
+
+.profile-type-badge.wireguard {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--green);
+}
+
+/* ======================== PROFILE FORM (add/edit) ======================== */
+.profile-form {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.35s ease, opacity 0.25s ease, margin 0.35s ease;
+  margin-bottom: 0;
+}
+
+.profile-form.open {
+  /* Запас под WireGuard: textarea там 9 строк, в 360px форма обрезалась. */
+  max-height: 480px;
+  opacity: 1;
+  margin-bottom: 12px;
+}
+
+/* Пока форма открыта, остальное не нужно: с формой WireGuard (textarea в
+   9 строк) popup вырастал до 738px и возвращалась прокрутка. Соседние
+   селекторы — форма стоит в разметке перед этими блоками. */
+#profileForm.open ~ .profile-list,
+#profileForm.open ~ .connection-card,
+#profileForm.open ~ .route-option {
+  display: none;
+}
+
+.profile-form-inner {
+  padding: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--accent);
+}
+
+.profile-form label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.profile-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  /* 80px не хватало: кнопка «Вставить» ~79px + 8px отступ. */
+  padding-right: 92px;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  transition: border-color 0.2s;
+  line-height: 1.5;
+}
+
+.profile-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.profile-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.profile-form-actions .btn {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+/* ======================== PROFILE LIST ======================== */
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Потолок подобран так, чтобы худший случай (полный список + подключено
+     + сообщение об ошибке) оставался в пределах 600px, которые Chrome
+     отводит popup. */
+  max-height: 280px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.profile-list::-webkit-scrollbar {
+  width: 3px;
+}
+.profile-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.profile-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.profile-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+  gap: 8px;
+}
+
+.profile-item:hover {
+  border-color: var(--accent);
+}
+
+.profile-item.active {
+  border-color: var(--accent);
+  background: rgba(102, 126, 234, 0.06);
+}
+
+.profile-item.locked {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.profile-item.locked .profile-item-select {
+  cursor: not-allowed;
+}
+
+/* ---- Инлайн-подтверждение удаления (вместо модального confirm) ---- */
+.profile-item.confirm-delete {
+  border-color: var(--red);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.confirm-text {
+  font-size: 12px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-confirm-delete,
+.btn-cancel-delete {
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-confirm-delete {
+  background: var(--red);
+  color: white;
+}
+
+.btn-confirm-delete:hover {
+  filter: brightness(1.08);
+}
+
+.btn-cancel-delete {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-cancel-delete:hover {
+  background: var(--border);
+}
+
+.profile-item-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-item-radio {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.profile-item.active .profile-item-radio {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--bg-card);
+}
+
+.profile-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* 14px иконка + 2×6px padding = 26px: минимум WCAG 2.5.8 — 24×24. */
+.profile-item-actions .icon-btn {
+  padding: 6px;
+}
+
+/* Удаление необратимо — отделяем от «Редактировать», чтобы не промахнуться. */
+.profile-item-actions .delete-btn {
+  margin-left: 4px;
+}
+
+.profile-item-actions .ping-result {
+  font-size: 11px;
+  min-width: 32px;
+}
+
+.profile-item-actions .delete-btn:hover {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-btn.ping-btn {
+  color: var(--green);
+}
+.icon-btn.ping-btn:hover {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--green);
+}
+
+.ping-result {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  min-width: 40px;
+  text-align: center;
+}
+
+.ping-result.loading {
+  color: var(--accent);
+  animation: pulse-text 1s ease-in-out infinite;
+}
+
+.ping-result.success {
+  color: var(--green);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.ping-result.error {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ======================== CONNECTION CARD ========================
+   Тумблер и сведения о подключении — в одной строке. Раньше это были два
+   отдельных блока (кнопка по центру + таблица «Сервер / Время работы»),
+   вместе занимавшие ~240px: подвал уезжал за пределы popup. */
+.connection-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.connection-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.connection-rows {
+  display: grid;
+  /* Значение сразу за подписью: при выравнивании по правому краю между ними
+     зиял пустой провал в полкарточки. */
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1px 8px;
+  margin-top: 3px;
+}
+
+.conn-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.conn-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  /* длинный домен не должен распирать карточку */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toggle-button {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.4s ease;
+}
+
+.toggle-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toggle-ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2.5px solid var(--border);
+  transition: all 0.4s ease;
+}
+
+.toggle-button:not(:disabled):hover .toggle-ring {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px var(--accent-glow);
+  transform: scale(1.03);
+}
+
+.toggle-inner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(145deg, #4a5568, #2d3748);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.4s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), inset 0 1px 3px rgba(255, 255, 255, 0.08);
+}
+
+.power-icon {
+  width: 22px;
+  height: 22px;
+  stroke: #a0aec0;
+  transition: all 0.4s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+/* Connected */
+.toggle-button.connected .toggle-ring {
+  border: 3px solid #34d399;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.15), transparent 70%);
+  box-shadow: 0 0 20px rgba(52, 211, 153, 0.4), 0 0 40px rgba(52, 211, 153, 0.15);
+  animation: pulse-ring 2.5s infinite;
+}
+
+.toggle-button.connected .toggle-inner {
+  background: linear-gradient(145deg, #34d399, #059669);
+  box-shadow: 0 0 20px rgba(52, 211, 153, 0.35), 0 4px 15px rgba(0, 0, 0, 0.2),
+    inset 0 1px 6px rgba(255, 255, 255, 0.2);
+}
+
+.toggle-button.connected .power-icon {
+  stroke: #ffffff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.4));
+}
+
+/* Connecting */
+.toggle-button.connecting .toggle-ring {
+  border: 3px solid var(--accent);
+  box-shadow: 0 0 18px var(--accent-glow);
+  animation: spin 1.5s linear infinite;
+}
+
+.toggle-button.connecting .toggle-inner {
+  background: linear-gradient(145deg, #667eea, #764ba2);
+  box-shadow: 0 0 18px var(--accent-glow), 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-button.connecting .power-icon {
+  stroke: #ffffff;
+  stroke-width: 2.5;
+  animation: pulse-icon 1s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(52, 211, 153, 0.4), 0 0 40px rgba(52, 211, 153, 0.15);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 28px rgba(52, 211, 153, 0.5), 0 0 50px rgba(52, 211, 153, 0.2);
+    transform: scale(1.01);
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-icon {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.toggle-status {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: color 0.3s ease;
+}
+
+.toggle-status.connected {
+  color: var(--green);
+}
+
+.toggle-status.connecting {
+  color: var(--accent);
+}
+
+/* ======================== ROUTE OPTION ======================== */
+.route-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.route-option:hover {
+  border-color: var(--accent);
+}
+
+.route-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.route-option:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.route-option-text {
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.route-option-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Предупреждение о реальном IP остаётся на виду — прятать его в тултип нельзя,
+   это про приватность. Своя строка, а не перенос посреди фразы. */
+.route-option-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ======================== MESSAGES ======================== */
+.error-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.5;
+  animation: fadeSlideIn 0.25s ease;
+}
+
+.error-message,
+.success-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.message-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-close {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: opacity 0.2s;
+}
+
+.message-close:hover {
+  opacity: 1;
+}
+
+.error-message .error-setup-link {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+  text-decoration: underline;
+  font-size: 12px;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.success-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: var(--radius-sm);
+  color: var(--green);
+  font-size: 12px;
+  animation: fadeSlideIn 0.25s ease;
+}
+
+/* ======================== ANIMATIONS ======================== */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-out {
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-in {
+  animation: fadeSlideIn 0.3s ease forwards;
+}
+
+/* Hidden by default (JS toggles display).
+   Идёт последним: перебивает display:flex у .error-message/.success-message. */
+.hidden {
+  display: none;
+}
+
+/* ======================== REDUCED MOTION ========================
+   pulse-ring/spin/pulse-text крутятся бесконечно — для пользователей
+   с вестибулярными расстройствами гасим анимации, оставляя состояния. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+

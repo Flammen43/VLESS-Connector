@@ -1,0 +1,60 @@
+# Бинарные файлы
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pyd
+
+# Но сохраняем структуру bin/
+!bin/.gitkeep
+
+# installer/dist и installer/build — результат installer/build.ps1
+# (PyInstaller --onedir): помимо *.exe/*.dll внутри _internal/ лежат .pyd
+# и файлы dist-info/ без расширения (метаданные psutil), поэтому папки
+# целиком, а не по маскам.
+installer/dist/
+installer/build/
+
+# Go
+go.sum
+native-host/go.sum
+
+# Логи и временные файлы
+*.log
+*.tmp
+config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Chrome Extension (при загрузке в магазин)
+*.crx
+*.zip
+
+# Конфиденциальные данные
+*.key
+*.cert
+# в т.ч. vlesschrome-private.pem — ключ постоянного Extension ID
+*.pem
+vless.txt
+*.conf
+
+# Tests
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# release/ — собранные архивы и кэш загруженных бинарников Xray
+release/out/
+release/cache/
+release/stage/

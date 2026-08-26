@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VLESS Chrome Setup</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-s: #f4f6f9;
+      --bg-card: #f9fafb;
+      --text: #1a1a2e;
+      --text-s: #64748b;
+      --text-m: #94a3b8;
+      --border: #e2e8f0;
+      --accent: #667eea;
+      --accent-dark: #764ba2;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --radius: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --bg-s: #1e293b;
+        --bg-card: #1e293b;
+        --text: #e2e8f0;
+        --text-s: #94a3b8;
+        --text-m: #64748b;
+        --border: #334155;
+      }
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg-s);
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 20px;
+      color: var(--text);
+    }
+    .container {
+      background: var(--bg);
+      border-radius: 16px;
+      max-width: 560px;
+      width: 100%;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+      overflow: hidden;
+    }
+    .setup-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 28px 30px 22px;
+    }
+    .setup-header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .setup-header .subtitle {
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      display: flex;
+      gap: 4px;
+      padding: 0 30px;
+      margin-top: -6px;
+      position: relative;
+      z-index: 1;
+    }
+    .progress-segment {
+      flex: 1;
+      height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      transition: background 0.4s;
+    }
+    .progress-segment.done {
+      background: var(--green);
+    }
+    .progress-segment.active {
+      background: var(--accent);
+      animation: prog-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes prog-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .setup-body { padding: 24px 30px; }
+
+    /* Steps */
+    .step {
+      background: var(--bg-card);
+      border-left: 4px solid var(--border);
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .step.step-ok { border-left-color: var(--green); background: rgba(34,197,94,0.05); }
+    .step.step-warn { border-left-color: var(--yellow); background: rgba(245,158,11,0.05); }
+    .step.step-err { border-left-color: var(--red); background: rgba(239,68,68,0.05); }
+
+    .step-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .step-num {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .step.step-ok .step-num { background: var(--green); }
+    .step-title {
+      font-size: 15px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .step-badge {
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .step p {
+      font-size: 13px;
+      color: var(--text-s);
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    .ext-id {
+      background: #1e293b;
+      color: #6ee7b7;
+      padding: 12px 14px;
+      border-radius: 6px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 13px;
+      word-break: break-all;
+      margin: 10px 0;
+    }
+
+    .btn {
+      padding: 9px 18px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 3px;
+    }
+    .btn-p {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .btn-p:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.35); }
+    .btn-s {
+      background: var(--bg-s);
+      color: var(--text-s);
+      border: 1px solid var(--border);
+    }
+    .btn-s:hover { background: var(--border); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+
+    code {
+      background: var(--bg-s);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 12px;
+      border: 1px solid var(--border);
+    }
+
+    ol {
+      margin: 8px 0 8px 20px;
+      font-size: 13px;
+      color: var(--text-s);
+      line-height: 1.8;
+    }
+
+    /* Expandable detail blocks */
+    .detail-toggle {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 4px 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .detail-toggle:hover { text-decoration: underline; }
+    .detail-toggle .arrow { transition: transform 0.2s; font-size: 10px; }
+    .detail-toggle.open .arrow { transform: rotate(90deg); }
+
+    .detail-content {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, opacity 0.2s;
+      opacity: 0;
+    }
+    .detail-content.open {
+      max-height: 500px;
+      opacity: 1;
+      margin-top: 8px;
+    }
+
+    .detail-box {
+      background: var(--bg-s);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--text-s);
+      line-height: 1.7;
+    }
+
+    /* Toast-уведомление (замена alert) */
+    .toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      max-width: 360px;
+      padding: 14px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+      z-index: 9999;
+      transform: translateX(120%);
+      transition: transform 0.3s ease;
+      line-height: 1.5;
+    }
+    .toast.show { transform: translateX(0); }
+    .toast.toast-ok { background: #f0fdf4; border: 1px solid #86efac; color: #166534; }
+    .toast.toast-err { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
+    .toast.toast-info { background: #eff6ff; border: 1px solid #93c5fd; color: #1e40af; }
+
+    /* Status panel */
+    .status-panel {
+      margin-top: 16px;
+      padding: 14px 18px;
+      background: var(--bg-card);
+      border: 1.5px solid var(--accent);
+      border-radius: var(--radius);
+    }
+    .status-panel h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--accent);
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 13px;
+    }
+    .status-row .label { color: var(--text-s); }
+    .status-row .val { font-weight: 600; }
+    .status-row .val.ok { color: var(--green); }
+    .status-row .val.err { color: var(--red); }
+    .status-row .val.warn { color: var(--yellow); }
+
+    .setup-footer {
+      padding: 16px 30px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .divider {
+      border-top: 1px solid var(--border);
+      margin: 12px 0;
+    }
+
+    .inline-feedback {
+      font-size: 12px;
+      color: var(--green);
+      margin-left: 8px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .saved-path-block {
+      margin: 8px 0;
+    }
+    .hidden {
+      display: none;
+    }
+    .path-code {
+      word-break: break-all;
+    }
+    .diag-block {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--text-s);
+    }
+    .diag-block summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--accent);
+      padding: 4px 0;
+    }
+    .diag-block .ext-id { font-size: 12px; }
+    .id-mismatch {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: rgba(239,68,68,0.06);
+      border: 1px solid rgba(239,68,68,0.25);
+      color: var(--red);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in { animation: fadeIn 0.3s ease; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="setup-header">
+      <h1>Настройка VLESS Connector</h1>
+      <p class="subtitle">Последний шаг перед использованием</p>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-segment" id="prog1"></div>
+      <div class="progress-segment" id="prog2"></div>
+    </div>
+
+    <div class="setup-body">
+      <!-- Step 1 -->
+      <div class="step" id="step1">
+        <div class="step-head">
+          <div class="step-num" id="step1-num">1</div>
+          <div class="step-title">Установите Native Host</div>
+          <span class="step-badge" id="step1-badge"></span>
+        </div>
+        <p>Расширение управляет Xray через небольшую программу-посредник. Запустите
+           <code>install.bat</code> в корне проекта VLESSCHROME — он поставит всё сам:
+           зависимости, Xray и регистрацию в браузере.</p>
+        <div id="savedPathInfo" class="saved-path-block hidden">
+          <div class="detail-box">
+            <strong>Путь к установщику:</strong><br>
+            <code id="savedPathText" class="path-code"></code>
+          </div>
+        </div>
+        <button class="detail-toggle" id="showPathToggle">
+          <span class="arrow">▶</span> Как запустить?
+        </button>
+        <div class="detail-content" id="pathDetail">
+          <div class="detail-box">
+            <strong>Через Проводник:</strong> откройте папку проекта VLESSCHROME и запустите
+            <code>install.bat</code> двойным кликом.<br><br>
+            <strong>Через командную строку:</strong> Win+R → <code>cmd</code> →
+            <code>cd "путь\к\VLESSCHROME"</code> → <code>install.bat</code><br><br>
+            Копировать Extension ID и перезапускать браузер не нужно — ID расширения
+            задан заранее полем <code>key</code> в манифесте.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step" id="step2">
+        <div class="step-head">
+          <div class="step-num" id="step2-num">2</div>
+          <div class="step-title">Проверьте связь</div>
+          <span class="step-badge" id="step2-badge"></span>
+        </div>
+        <p>После установки нажмите кнопку ниже. Если Native Host отвечает — всё готово,
+           можно закрывать эту страницу и подключаться.</p>
+        <button class="btn btn-p" id="testConnectionBtn">Проверить подключение</button>
+        <button class="btn btn-s" id="refreshStatusBtn">Обновить статус</button>
+      </div>
+
+      <!-- Status panel -->
+      <div class="status-panel" id="statusPanel">
+        <h4>Статус конфигурации</h4>
+        <div id="statusDetails"></div>
+      </div>
+
+      <details class="diag-block">
+        <summary>Диагностика</summary>
+        <div class="detail-box" style="margin-top:8px;">
+          <strong>Extension ID:</strong>
+          <div class="ext-id" id="extensionId">Загрузка...</div>
+          <button class="btn btn-s" id="copyIdBtn">Копировать ID</button>
+          <span id="copyFeedback" class="inline-feedback">Скопировано!</span>
+          <div class="divider"></div>
+          <strong>Папка установки:</strong> <code>%LOCALAPPDATA%\VLESSChrome</code><br>
+          <button class="btn btn-s" id="openFolderBtn">Копировать путь</button>
+          <span id="pathCopyFeedback" class="inline-feedback">Скопировано!</span>
+          <div class="divider"></div>
+          Логи: <code>%LOCALAPPDATA%\VLESSChrome\native-host.log</code><br>
+          Полная проверка: <code>check-installation.bat</code> в корне проекта.
+        </div>
+      </details>
+    </div>
+
+    <div class="setup-footer">
+      <button class="btn btn-s" id="openExtensionsBtn">chrome://extensions/</button>
+      <button class="btn btn-s" id="closeBtn">Закрыть</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="setup.js"></script>
+</body>
+</html>

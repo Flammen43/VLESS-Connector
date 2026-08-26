@@ -1,0 +1,1 @@
+vless://YOUR-UUID@server.example.com:443?type=tcp&security=reality&pbk=YOUR_PUBLIC_KEY&fp=chrome&sni=yahoo.com&sid=SHORT_ID&spx=%2F&flow=xtls-rprx-vision#remark

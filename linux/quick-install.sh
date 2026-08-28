@@ -63,6 +63,11 @@ REQ_FILE="$SCRIPT_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
     if python3 -m pip install --user -q -r "$REQ_FILE" 2>/dev/null; then
         echo -e "${GREEN}[OK] psutil установлен${NC}"
+    # PEP 668: в SteamOS, Debian 12+, Fedora и других дистрибутивах Python
+    # помечен «externally managed», и pip отказывается ставить пакеты без
+    # явного флага. Ставим в --user, системные файлы при этом не трогаются.
+    elif python3 -m pip install --user -q --break-system-packages -r "$REQ_FILE" 2>/dev/null; then
+        echo -e "${GREEN}[OK] psutil установлен (--break-system-packages)${NC}"
     else
         echo -e "${YELLOW}[WARN] Не удалось через pip, пробуем pip3...${NC}"
         pip3 install --user -q psutil 2>/dev/null && \
@@ -279,6 +284,46 @@ for browser in "${!BROWSERS[@]}"; do
     cp "$MANIFEST_PATH" "$dir/$MANIFEST_NAME"
     echo -e "${GREEN}  ✓ $browser${NC}"
 done
+
+# Flatpak-браузеры (стандарт на Steam Deck и во многих дистрибутивах) живут
+# в песочнице и читают манифесты не из ~/.config, а из своего каталога
+# ~/.var/app/<id>/config/... Без этого расширение сообщает, что native host
+# не установлен, хотя установка прошла успешно.
+declare -A FLATPAK_BROWSERS=(
+    ["com.google.Chrome"]="google-chrome"
+    ["org.chromium.Chromium"]="chromium"
+    ["com.brave.Browser"]="BraveSoftware/Brave-Browser"
+    ["com.microsoft.Edge"]="microsoft-edge"
+    ["com.vivaldi.Vivaldi"]="vivaldi"
+    ["ru.yandex.Browser"]="yandex-browser"
+)
+
+FLATPAK_FOUND=0
+for app_id in "${!FLATPAK_BROWSERS[@]}"; do
+    app_root="$HOME/.var/app/$app_id"
+    # Каталог существует только если браузер реально установлен как Flatpak —
+    # иначе не создаём мусор.
+    [ -d "$app_root" ] || continue
+    dir="$app_root/config/${FLATPAK_BROWSERS[$app_id]}/NativeMessagingHosts"
+    mkdir -p "$dir"
+    cp "$MANIFEST_PATH" "$dir/$MANIFEST_NAME"
+    echo -e "${GREEN}  ✓ $app_id (Flatpak)${NC}"
+    FLATPAK_FOUND=1
+
+    # Песочница по умолчанию может не видеть каталог с хостом: манифест
+    # лежит правильно, но запустить native-host.sh браузер не сможет.
+    if command -v flatpak >/dev/null 2>&1; then
+        flatpak override --user --filesystem="$INSTALL_DIR" "$app_id" 2>/dev/null \
+            && echo -e "${GRAY}    выдан доступ к $INSTALL_DIR${NC}" \
+            || echo -e "${YELLOW}    не удалось выдать доступ — см. подсказку ниже${NC}"
+    fi
+done
+
+if [ "$FLATPAK_FOUND" = "1" ]; then
+    echo -e "${GRAY}  Flatpak-браузеры найдены. Если расширение всё равно не видит host,${NC}"
+    echo -e "${GRAY}  выполните вручную и перезапустите браузер:${NC}"
+    echo -e "${GRAY}    flatpak override --user --filesystem=$INSTALL_DIR <app-id>${NC}"
+fi
 
 # ─────────────────────────────────────────────────────────
 # Шаг 6: Проверка установки

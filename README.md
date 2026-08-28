@@ -438,6 +438,11 @@ MIT License
 - 🐛 Песочнице Flatpak выдаётся доступ к каталогу хоста через
   `flatpak override --filesystem` — без этого браузер видит манифест, но не
   может запустить сам хост
+- 🐛 Каталог данных хоста задаётся явно через `VLESSCHROME_APP_DIR`, который
+  обёртка подставляет как путь к самой себе. Внутри песочницы Flatpak
+  подменяет `XDG_CONFIG_HOME` на `~/.var/app/<id>/config`, и хост искал
+  `xray` там, хотя установщик клал его в `~/.config/VLESSChrome` —
+  подключение падало с «xray не найден»
 - 🐛 `pip install` с `--break-system-packages` как запасной путь: в SteamOS,
   Debian 12+ и Fedora Python помечен «externally managed» (PEP 668), и
   psutil не ставился. Ставится в `--user`, системные файлы не затрагиваются

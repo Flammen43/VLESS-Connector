@@ -54,6 +54,39 @@ def test_xray_binary_name():
 # скрипты обязаны класть файлы ровно туда, куда потом смотрит хост, поэтому
 # путь фиксируем тестом.
 
+def test_app_dir_explicit_wins_over_everything():
+    """VLESSCHROME_APP_DIR перебивает все остальные источники.
+
+    Обёртка native-host.sh подставляет туда каталог, где лежит сам хост.
+    Без этого Flatpak-браузер подменял XDG_CONFIG_HOME на
+    ~/.var/app/<id>/config, и хост искал xray там, а не в каталоге установки.
+    """
+    app_dir = native_host.app_dir_for(
+        'posix', 'linux', '/home/deck',
+        xdg='/home/deck/.var/app/com.google.Chrome/config',
+        explicit='/home/deck/.config/VLESSChrome',
+    )
+    assert str(app_dir).replace('\\', '/') == '/home/deck/.config/VLESSChrome'
+
+
+def test_app_dir_explicit_wins_on_every_platform():
+    for os_name, platform, extra in (
+        ('nt', 'win32', {'localappdata': 'C:/Users/u/AppData/Local'}),
+        ('posix', 'darwin', {}),
+        ('posix', 'linux', {'xdg': '/tmp/xdg'}),
+    ):
+        app_dir = native_host.app_dir_for(
+            os_name, platform, '/home/u', explicit='/opt/vlesschrome', **extra
+        )
+        assert str(app_dir).replace('\\', '/') == '/opt/vlesschrome'
+
+
+def test_app_dir_ignores_empty_explicit():
+    """Пустая переменная не должна уводить путь в корень."""
+    app_dir = native_host.app_dir_for('posix', 'linux', '/home/u', explicit='')
+    assert app_dir.parts[-2:] == ('.config', 'VLESSChrome')
+
+
 def test_app_dir_on_macos_ignores_xdg():
     """macOS: рядом с манифестами браузеров, а не в ~/.config.
 

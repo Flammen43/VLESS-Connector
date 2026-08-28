@@ -200,7 +200,7 @@ except ImportError:
     psutil = None
 
 
-def app_dir_for(os_name, platform, home, localappdata=None, xdg=None):
+def app_dir_for(os_name, platform, home, localappdata=None, xdg=None, explicit=None):
     """Куда класть данные приложения на каждой платформе.
 
     Чистая функция: все внешние данные приходят аргументами, поэтому ветки
@@ -209,7 +209,15 @@ def app_dir_for(os_name, platform, home, localappdata=None, xdg=None):
 
     Установочные скрипты обязаны класть файлы ровно сюда же, иначе хост их
     не найдёт.
+
+    explicit (VLESSCHROME_APP_DIR) имеет приоритет над всем остальным: его
+    выставляет обёртка native-host.sh/.bat, подставляя каталог, где лежит
+    сама. Это единственный надёжный способ в песочнице — Flatpak-браузер
+    подменяет XDG_CONFIG_HOME на ~/.var/app/<id>/config, и хост, запущенный
+    внутри песочницы, искал xray там, а установщик клал его в ~/.config.
     """
+    if explicit:
+        return Path(explicit)
     if os_name == 'nt' and localappdata:
         return Path(localappdata) / 'VLESSChrome'
     # macOS: рядом с манифестами native messaging, которые Chrome держит
@@ -231,6 +239,7 @@ def get_app_dir():
         Path.home(),
         os.getenv('LOCALAPPDATA'),
         os.getenv('XDG_CONFIG_HOME'),
+        os.getenv('VLESSCHROME_APP_DIR'),
     )
 
 

@@ -79,7 +79,10 @@ foreach ($f in Get-ChildItem "$srcDir\*.py") {
 # писалась под 'py -3'), и при установке Python в C:\Program Files\... получался
 # неработающий .bat. Теперь Resolve-PythonExe всегда возвращает полный путь.
 $batPath = "$installDir\native-host.bat"
-$batContent = "@echo off`r`n`"$pyExe`" `"%~dp0native_host.py`""
+# VLESSCHROME_APP_DIR — каталог самого хоста. На Windows песочниц нет, но
+# держим одинаково со всеми платформами: путь к данным задаётся явно, а не
+# выводится из переменных окружения браузера.
+$batContent = "@echo off`r`nset `"VLESSCHROME_APP_DIR=%~dp0`"`r`n`"$pyExe`" `"%~dp0native_host.py`""
 Write-Utf8NoBom $batPath $batContent
 Write-Ok "native-host.bat"
 

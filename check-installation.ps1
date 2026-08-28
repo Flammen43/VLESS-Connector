@@ -75,6 +75,43 @@ if (-not (Test-Path $installDir)) {
             $errorCount++
         }
     }
+
+    # Версия xray раньше нигде не показывалась, и устаревший бинарник можно
+    # было опознать только по тексту ошибки при неудачном подключении:
+    # у одного пользователя так остался 1.8.7 без поддержки транспорта xhttp.
+    $xrayExe = "$installDir\xray.exe"
+    if (Test-Path $xrayExe) {
+        $installed = $null
+        try {
+            $line = & $xrayExe version 2>$null | Select-Object -First 1
+            $m = [regex]::Match([string] $line, 'Xray\s+(\d+\.\d+\.\d+)')
+            if ($m.Success) { $installed = $m.Groups[1].Value }
+        } catch { }
+
+        if (-not $installed) {
+            Write-Warn "Не удалось определить версию xray.exe (файл повреждён?)"
+            $warningCount++
+        } else {
+            $latest = $null
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/XTLS/Xray-core/releases/latest" `
+                    -Headers @{ 'User-Agent' = 'VLESSChrome-check' } -TimeoutSec 15
+                if ($rel.tag_name) { $latest = $rel.tag_name.TrimStart('v') }
+            } catch { }
+
+            if (-not $latest) {
+                Write-Ok "Версия xray: $installed (последнюю проверить не удалось)"
+            } elseif ($installed -eq $latest) {
+                Write-Ok "Версия xray: $installed (актуальна)"
+            } else {
+                Write-Warn "Версия xray: $installed, доступна $latest"
+                Write-Host "       Старые сборки не знают новых транспортов (xhttp и др.)." -ForegroundColor Gray
+                Write-Host "       Обновить: install.bat" -ForegroundColor Gray
+                $warningCount++
+            }
+        }
+    }
 }
 Write-Host ""
 

@@ -189,3 +189,91 @@ def test_wireguard_ru_direct_keeps_query_strategy(geo):
 
     cfg = XrayManager()._generate_config({**WIREGUARD, 'routeRuDirect': True})
     assert cfg['dns']['queryStrategy'] == expected
+
+
+# ── транспорты ──────────────────────────────────────────────────
+#
+# Имена секций и допустимые режимы сверены с самим xray 26.3.27
+# (`xray run -test`), а не взяты из документации: h2 из него удалён, а
+# неизвестный режим xhttp он не игнорирует, а отказывается стартовать.
+
+def stream(cfg):
+    return cfg['outbounds'][0]['streamSettings']
+
+
+def vless_with(**extra):
+    return {**VLESS, **extra}
+
+
+def test_ws_transport_unchanged():
+    cfg = XrayManager()._generate_config(
+        vless_with(type='ws', path='/p', host='h.example'))
+    assert stream(cfg)['wsSettings'] == {'path': '/p', 'headers': {'Host': 'h.example'}}
+
+
+def test_grpc_transport_unchanged():
+    cfg = XrayManager()._generate_config(vless_with(type='grpc', path='svc'))
+    assert stream(cfg)['grpcSettings'] == {'serviceName': 'svc'}
+
+
+def test_xhttp_builds_settings():
+    """Раньше для xhttp секция настроек не создавалась вовсе."""
+    cfg = XrayManager()._generate_config(
+        vless_with(type='xhttp', path='/p', host='h.example', mode='packet-up'))
+    s = stream(cfg)
+    assert s['network'] == 'xhttp'
+    assert s['xhttpSettings'] == {'path': '/p', 'host': 'h.example', 'mode': 'packet-up'}
+
+
+def test_xhttp_without_mode_omits_field():
+    cfg = XrayManager()._generate_config(vless_with(type='xhttp', path='/p'))
+    assert 'mode' not in stream(cfg)['xhttpSettings']
+
+
+def test_xhttp_rejects_unknown_mode():
+    """Неизвестный режим уронил бы xray целиком — поле пропускаем."""
+    cfg = XrayManager()._generate_config(
+        vless_with(type='xhttp', path='/p', mode='чушь'))
+    assert 'mode' not in stream(cfg)['xhttpSettings']
+
+
+def test_splithttp_is_alias_for_xhttp():
+    cfg = XrayManager()._generate_config(vless_with(type='splithttp', path='/p'))
+    assert stream(cfg)['network'] == 'xhttp'
+    assert 'xhttpSettings' in stream(cfg)
+
+
+def test_httpupgrade_transport():
+    cfg = XrayManager()._generate_config(
+        vless_with(type='httpupgrade', path='/p', host='h.example'))
+    s = stream(cfg)
+    assert s['network'] == 'httpupgrade'
+    assert s['httpupgradeSettings'] == {'path': '/p', 'host': 'h.example'}
+
+
+def test_h2_migrated_to_xhttp_stream_one():
+    """Xray удалил h2 и сам указывает на XHTTP stream-one как замену.
+
+    Без миграции старые профили просто перестают работать после
+    обновления xray.
+    """
+    cfg = XrayManager()._generate_config(
+        vless_with(type='h2', path='/p', host='h.example'))
+    s = stream(cfg)
+    assert s['network'] == 'xhttp'
+    assert 'httpSettings' not in s
+    assert s['xhttpSettings']['mode'] == 'stream-one'
+
+
+def test_h2_respects_explicit_mode():
+    cfg = XrayManager()._generate_config(
+        vless_with(type='h2', path='/p', mode='auto'))
+    assert stream(cfg)['xhttpSettings']['mode'] == 'auto'
+
+
+def test_tcp_has_no_transport_section():
+    cfg = XrayManager()._generate_config(vless_with(type='tcp'))
+    s = stream(cfg)
+    assert s['network'] == 'tcp'
+    for key in ('wsSettings', 'grpcSettings', 'xhttpSettings', 'httpupgradeSettings'):
+        assert key not in s

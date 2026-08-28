@@ -75,6 +75,44 @@ function Resolve-PythonExe {
     return $null
 }
 
+function Get-XrayVersion {
+    <#
+        Версия установленного xray, либо $null.
+
+        `xray version` печатает первой строкой:
+            Xray 26.3.27 (Xray, Penetrates Everything.) d2758a0 (go1.26.1 ...)
+    #>
+    param([string] $Path)
+
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    try {
+        $out = & $Path version 2>$null | Select-Object -First 1
+        $m = [regex]::Match([string] $out, 'Xray\s+(\d+\.\d+\.\d+)')
+        if ($m.Success) { return $m.Groups[1].Value }
+    } catch {
+        # Битый или несовместимый бинарник — считаем версию неизвестной,
+        # тогда вызывающий код просто перекачает его заново.
+    }
+    return $null
+}
+
+function Get-LatestXrayVersion {
+    <#
+        Последняя версия Xray с GitHub, либо $null при недоступности API.
+        $null означает «не знаю» — обновление в этом случае не навязываем,
+        чтобы отсутствие сети не ломало установку.
+    #>
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/XTLS/Xray-core/releases/latest" `
+            -Headers @{ 'User-Agent' = 'VLESSChrome-installer' } -TimeoutSec 20
+        if ($release.tag_name) { return $release.tag_name.TrimStart('v') }
+    } catch {
+        Write-Warn "GitHub API недоступен — проверка версии Xray пропущена"
+    }
+    return $null
+}
+
 function Test-Sha256FromDgst {
     <#
         Сверяет файл с контрольной суммой из .dgst, лежащего рядом с архивом
@@ -149,16 +187,50 @@ function Install-XrayAndGeo {
         [Parameter(Mandatory)] [string] $InstallDir
     )
 
+    # Последнюю версию узнаём заранее: от неё зависит не только загрузка, но
+    # и решение, не устарел ли уже установленный бинарник.
+    $script:LatestXrayVersion = Get-LatestXrayVersion
+
     $xrayTarget = "$InstallDir\xray.exe"
     $geoMissing = @($GeoFiles | Where-Object { -not (Test-Path "$InstallDir\$_") })
 
-    $needXray = -not (Test-Path $xrayTarget)
-    if ($needXray -and (Test-Path "$ProjectDir\bin\xray.exe")) {
-        Copy-Item "$ProjectDir\bin\xray.exe" $xrayTarget -Force
-        Write-Ok "xray.exe взят из bin\"
-        $needXray = $false
+    # Раньше проверялось только наличие файла, и установленный однажды xray
+    # не обновлялся никогда. У пользователя так остался 1.8.7 (2023 год), а
+    # его сервер использовал транспорт xhttp, которого в той версии нет —
+    # подключение падало с «unknown transport protocol: xhttp».
+    $installedVersion = Get-XrayVersion $xrayTarget
+    $xrayMissing = -not (Test-Path $xrayTarget)
+    $needXray = $xrayMissing
+
+    if (-not $needXray -and $installedVersion -and $LatestXrayVersion `
+            -and $installedVersion -ne $LatestXrayVersion) {
+        Write-Warn "xray.exe устарел: v$installedVersion, доступна v$LatestXrayVersion"
+        $needXray = $true
     }
-    if (-not $needXray) { Write-Ok "xray.exe уже установлен" }
+
+    if ($needXray -and (Test-Path "$ProjectDir\bin\xray.exe")) {
+        $cached = Get-XrayVersion "$ProjectDir\bin\xray.exe"
+        # Когда файла нет вовсе, годится любой кэш — лучше рабочий бинарник,
+        # чем ничего. А если мы пришли сюда из-за устаревшей версии, кэш
+        # обязан быть проверяемо свежим: иначе «обновление» подсунуло бы
+        # такой же старый или битый файл, и ошибка вернулась бы к пользователю.
+        $cacheOk = if ($xrayMissing) {
+            $true
+        } else {
+            $cached -and $LatestXrayVersion -and $cached -eq $LatestXrayVersion
+        }
+        if ($cacheOk) {
+            Copy-Item "$ProjectDir\bin\xray.exe" $xrayTarget -Force
+            Write-Ok "xray.exe взят из bin\$(if ($cached) { " (v$cached)" })"
+            $needXray = $false
+        } else {
+            Write-Host "  Кэш в bin\ не подходит$(if ($cached) { " (v$cached)" } else { ' (версия не читается)' }) — качаю" -ForegroundColor Gray
+        }
+    }
+    if (-not $needXray) {
+        $v = Get-XrayVersion $xrayTarget
+        Write-Ok "xray.exe установлен$(if ($v) { " (v$v)" })"
+    }
 
     foreach ($geo in @($geoMissing)) {
         if (Test-Path "$ProjectDir\bin\$geo") {
@@ -179,15 +251,8 @@ function Install-XrayAndGeo {
         Write-Host "  Гео-базы отсутствуют ($($geoMissing -join ', ')) — нужен архив" -ForegroundColor Gray
     }
 
-    $xrayVersion = $FallbackXrayVersion
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/XTLS/Xray-core/releases/latest" `
-            -Headers @{ 'User-Agent' = 'VLESSChrome-installer' } -TimeoutSec 20
-        if ($release.tag_name) { $xrayVersion = $release.tag_name.TrimStart('v') }
-    } catch {
-        Write-Warn "GitHub API недоступен, ставим v$FallbackXrayVersion"
-    }
+    # Версию уже выяснили выше, до решения об обновлении.
+    $xrayVersion = if ($LatestXrayVersion) { $LatestXrayVersion } else { $FallbackXrayVersion }
 
     $zip = "$InstallDir\xray.zip"
     $tmp = "$InstallDir\xray-temp"

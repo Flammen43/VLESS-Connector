@@ -247,6 +247,10 @@ def get_xray_binary_name():
     return 'xray.exe' if os.name == 'nt' else 'xray'
 
 
+# Режимы транспорта xhttp. Значения сверены с самим xray: неизвестный режим
+# он не игнорирует, а отказывается стартовать («unsupported mode»).
+XHTTP_MODES = ('auto', 'packet-up', 'stream-up', 'stream-one')
+
 MAX_NATIVE_MESSAGE_BYTES = 4 * 1024 * 1024
 
 # Батч-лимит: расширение шлёт по одному секрету на профиль, тысячи профилей
@@ -790,7 +794,8 @@ class XrayManager:
         pbk = config.get('pbk', '')
         sid = config.get('sid', '')
         spx = config.get('spx', '')
-        
+        mode = config.get('mode', '')  # режим xhttp
+
         xray_config = {
             "log": {
                 "loglevel": "warning"
@@ -812,14 +817,16 @@ class XrayManager:
                     }]
                 },
                 "streamSettings": self._build_stream_settings(
-                    security, network_type, host, path, sni, alpn, fingerprint, pbk, sid, spx
+                    security, network_type, host, path, sni, alpn, fingerprint,
+                    pbk, sid, spx, mode
                 )
             }]
         }
         
         return xray_config
     
-    def _build_stream_settings(self, security, network_type, host, path, sni, alpn, fingerprint, pbk='', sid='', spx=''):
+    def _build_stream_settings(self, security, network_type, host, path, sni, alpn,
+                               fingerprint, pbk='', sid='', spx='', mode=''):
         """Построение streamSettings"""
         stream_settings = {
             "network": network_type
@@ -871,21 +878,51 @@ class XrayManager:
             if host:
                 ws_settings["headers"] = {"Host": host}
             stream_settings["wsSettings"] = ws_settings
-            
+
         elif network_type == "grpc":
             grpc_settings = {}
             if path:
                 grpc_settings["serviceName"] = path
             stream_settings["grpcSettings"] = grpc_settings
-            
-        elif network_type == "h2":
-            http_settings = {}
+
+        elif network_type == "httpupgrade":
+            hu_settings = {}
             if path:
-                http_settings["path"] = path
+                hu_settings["path"] = path
             if host:
-                http_settings["host"] = [host]
-            stream_settings["httpSettings"] = http_settings
-        
+                hu_settings["host"] = host
+            stream_settings["httpupgradeSettings"] = hu_settings
+
+        elif network_type in ("xhttp", "splithttp", "h2", "http"):
+            # splithttp — прежнее имя xhttp, оставлено для старых ссылок.
+            # h2/http Xray удалил: «has been removed and migrated to XHTTP
+            # stream-one H2 & H3». Переводим на xhttp сами, иначе профиль
+            # просто перестаёт работать после обновления xray.
+            stream_settings["network"] = "xhttp"
+            xhttp_settings = {}
+            if path:
+                xhttp_settings["path"] = path
+            if host:
+                xhttp_settings["host"] = host
+
+            effective_mode = mode
+            if network_type in ("h2", "http") and not effective_mode:
+                effective_mode = "stream-one"
+                logging.info(
+                    f"Транспорт {network_type} удалён из Xray — "
+                    f"использую xhttp mode=stream-one"
+                )
+            if effective_mode:
+                if effective_mode in XHTTP_MODES:
+                    xhttp_settings["mode"] = effective_mode
+                else:
+                    # Неизвестный режим уронил бы запуск xray целиком
+                    # («unsupported mode»), а без поля он выберет auto.
+                    logging.warning(
+                        f"Неизвестный режим xhttp: {effective_mode} — пропущен"
+                    )
+            stream_settings["xhttpSettings"] = xhttp_settings
+
         return stream_settings
 
 

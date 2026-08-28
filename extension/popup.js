@@ -939,7 +939,10 @@ function parseVlessUrl(url) {
       flow: params.get('flow') || '',
       pbk: params.get('pbk') || '',
       sid: params.get('sid') || '',
-      spx: params.get('spx') || ''
+      spx: params.get('spx') || '',
+      // Режим транспорта xhttp (auto / packet-up / stream-up / stream-one).
+      // Без него ссылки вида ?type=xhttp&mode=... теряли настройку.
+      mode: params.get('mode') || ''
     };
   } catch (error) {
     throw new Error(`Ошибка парсинга URL: ${error.message}`);

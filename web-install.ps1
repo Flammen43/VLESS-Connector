@@ -95,9 +95,21 @@ try {
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
 }
 
-$installer = Join-Path $appDir 'install.ps1'
-if (-not (Test-Path $installer)) { Write-Fail "install.ps1 не найден в архиве"; exit 1 }
-Write-Ok "готово"
+# По умолчанию — вариант с native_host.exe: Python на машине не нужен.
+# Раньше здесь всегда звался корневой install.ps1 (нужен Python), и при
+# его отсутствии скрипт печатал "установите Python" и сразу закрывал
+# консоль — она держится только на время irm | iex. $env:VLESSCHROME_USE_PYTHON
+# оставлен как явный откат, если понадобится Python-вариант (например,
+# антивирус карантинит exe).
+if ($env:VLESSCHROME_USE_PYTHON) {
+    $installer = Join-Path $appDir 'install.ps1'
+    $variant = 'Python'
+} else {
+    $installer = Join-Path $appDir 'installer\install.ps1'
+    $variant = 'exe (без Python)'
+}
+if (-not (Test-Path $installer)) { Write-Fail "$installer не найден в архиве"; exit 1 }
+Write-Ok "готово ($variant)"
 
 # ─── [4/4] Установка ─────────────────────────────────────────
 Write-Step "[4/4] Запуск установщика..."

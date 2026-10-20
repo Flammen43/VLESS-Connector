@@ -31,8 +31,21 @@ def tcp_ping(host, port, timeout=5):
     return max(1, round((time.perf_counter() - t0) * 1000))
 
 
+# Имя или адрес, который можно отдать системному ping: первый символ не «-»,
+# иначе значение вроде «-f» или «-s 65500» ушло бы туда как опция, а не как цель.
+_PING_TARGET_RE = re.compile(r'^\w[\w.:%\-]*$')
+
+
+def safe_ping_target(host):
+    target = str(host or '').strip().strip('[]')
+    if not _PING_TARGET_RE.match(target):
+        raise ValueError(f'Недопустимый адрес для ping: {str(host)[:60]!r}')
+    return target
+
+
 def icmp_ping(host, timeout_ms=3000):
     """ICMP echo через системный ping. WG-порт UDP, TCP туда бессмысленен."""
+    host = safe_ping_target(host)
     timeout_ms = int(timeout_ms)
     t0 = time.perf_counter()
     if os.name == 'nt':

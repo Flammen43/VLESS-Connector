@@ -16,14 +16,16 @@ import struct
 def test_redact_nested_secrets():
     msg = {
         'action': 'start',
-        'config': {'secretKey': 'SECRET', 'uuid': 'u-1', 'server': 'ok.example'},
+        'config': {'secretKey': 'SECRET', 'uuid': 'u-1', 'security': 'tls', 'port': 443},
         'vlessUrl': 'vless://leak',
         'text': 'should-hide',
     }
     out = redact_for_log(msg)
     assert out['config']['secretKey'] == '***REDACTED***'
     assert out['config']['uuid'] == '***REDACTED***'
-    assert out['config']['server'] == 'ok.example'
+    # служебные поля остаются: без них лог бесполезен для диагностики
+    assert out['config']['security'] == 'tls'
+    assert out['config']['port'] == 443
     assert out['vlessUrl'] == '***REDACTED***'
     assert out['text'] == '***REDACTED***'
     assert out['action'] == 'start'

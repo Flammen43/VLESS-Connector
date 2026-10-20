@@ -40,7 +40,8 @@ def parse_wireguard_conf(text):
     current = None
 
     for raw_line in (text or '').splitlines():
-        line = raw_line.strip()
+        # комментарий в wg-quick — «#» в любом месте строки, а не только в начале
+        line = raw_line.split('#', 1)[0].strip()
         if line.startswith('\ufeff'):
             line = line.lstrip('\ufeff').strip()
         if not line or line.startswith('#') or line.startswith(';'):

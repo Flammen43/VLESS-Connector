@@ -5,21 +5,52 @@ VLESS Chrome Native Messaging Host (Python версия)
 Для использования когда Go не установлен
 """
 
-import json
 import sys
-import struct
-import subprocess
-import os
-import logging
-import time
-import atexit
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
-import socket
 
-from parsers import normalize_proxy_config, wireguard_ip_strategy
-from dpapi_store import protect_secret, unprotect_secret
-from host_ping import ping_host
+
+def _quiet_fail(stage, exc):
+    """Тихий выход при сбое старта.
+
+    exe собран с --noconsole, и любое необработанное исключение при запуске
+    PyInstaller показывает модальное окно «Unhandled exception in script» на
+    рабочем столе. Так выглядела установка с неполным _internal\\: окно вылезало
+    на каждый ping/status. Расширению достаточно закрытого потока — оно само
+    покажет «Native host отключился». Причину оставляем в файле во временном
+    каталоге, потому что обычный лог к этому моменту может быть ещё не создан.
+    """
+    try:
+        import tempfile
+        with open(os.path.join(tempfile.gettempdir(), 'vlesschrome-host-startup.log'),
+                  'a', encoding='utf-8') as f:
+            f.write(f"{stage}: {type(exc).__name__}: {exc}\n")
+    except BaseException:
+        pass
+    sys.exit(1)
+
+
+try:
+    import json
+    import struct
+    import subprocess
+    import os
+    import logging
+    import time
+    import signal
+    import atexit
+    from logging.handlers import RotatingFileHandler
+    from pathlib import Path
+    import socket
+
+    from parsers import normalize_proxy_config, wireguard_ip_strategy
+    from dpapi_store import protect_secret, unprotect_secret
+    from host_ping import ping_host
+except Exception as _import_error:
+    # os мог не успеть импортироваться — _quiet_fail сама этого не требует
+    try:
+        import os
+    except Exception:
+        pass
+    _quiet_fail('imports', _import_error)
 
 def get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -81,8 +112,29 @@ GEO_DNS_SERVERS = (
 ORPHAN_MAX_AGE_DAYS = 7
 
 
+def posix_process_name(pid):
+    """Имя процесса по PID без psutil: /proc на Linux, ps на macOS/BSD."""
+    try:
+        return Path(f'/proc/{int(pid)}/comm').read_text().strip()
+    except (OSError, ValueError):
+        pass
+    try:
+        out = subprocess.run(
+            ['ps', '-p', str(int(pid)), '-o', 'comm='],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        return ''
+    # macOS отдаёт полный путь, Linux — короткое имя
+    return os.path.basename((out or '').strip())
+
+
 def is_xray_pid_alive(pid):
-    """Жив ли процесс xray с этим PID (psutil, иначе tasklist)."""
+    """Жив ли процесс xray с этим PID (psutil, иначе tasklist / /proc / ps).
+
+    Имя проверяется всегда: PID-файл мог пережить перезагрузку, и тогда номер
+    принадлежит уже другому процессу, который нельзя трогать.
+    """
     if psutil:
         try:
             if not psutil.pid_exists(pid):
@@ -101,7 +153,42 @@ def is_xray_pid_alive(pid):
             return binary.lower() in (out or '').lower()
         except Exception:
             return False
-    return False
+    return 'xray' in posix_process_name(pid).lower()
+
+
+def _os_kill(pid, sig):
+    # На Windows os.kill(pid, 0) не «проверяет живость», а завершает процесс.
+    # Сюда Windows попасть не должна; если попала — лучше упасть, чем убить.
+    if os.name == 'nt':
+        raise RuntimeError("os.kill не используется на Windows")
+    os.kill(pid, sig)
+
+
+def posix_terminate(pid, timeout=5.0):
+    """Остановка xray по PID без psutil: SIGTERM, затем SIGKILL."""
+    if not is_xray_pid_alive(pid):
+        return False
+    logging.info(f"Остановка Xray (PID: {pid})")
+    try:
+        _os_kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    except OSError as e:
+        logging.error(f"Не удалось послать SIGTERM процессу {pid}: {e}")
+        return False
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_xray_pid_alive(pid):
+            return True
+        time.sleep(0.1)
+    try:
+        _os_kill(pid, getattr(signal, 'SIGKILL', signal.SIGTERM))
+    except ProcessLookupError:
+        pass
+    except OSError as e:
+        logging.error(f"Не удалось послать SIGKILL процессу {pid}: {e}")
+        return False
+    return True
 
 
 def group_profile_files(app_dir):
@@ -233,10 +320,12 @@ def app_dir_for(os_name, platform, home, localappdata=None, xdg=None, explicit=N
 
 def get_app_dir():
     """Кросс-платформенная директория данных приложения."""
+    explicit = os.getenv('VLESSCHROME_APP_DIR')
     return app_dir_for(
         os.name,
         sys.platform,
-        Path.home(),
+        # при явном каталоге домашний не нужен, а Path.home() без USERPROFILE/HOME падает
+        None if explicit else Path.home(),
         os.getenv('LOCALAPPDATA'),
         os.getenv('XDG_CONFIG_HOME'),
         os.getenv('VLESSCHROME_APP_DIR'),
@@ -278,13 +367,26 @@ def process_secret_batch(action, items):
     return results
 
 
+# Что не должно попадать в лог. Лог пользователь пересылает в поддержку
+# (TROUBLESHOOTING.md прямо просит), поэтому скрываем не только ключи, но и всё,
+# что позволяет подключиться к серверу или найти его.
+SENSITIVE_LOG_KEYS = frozenset({
+    # учётные данные
+    'secretkey', 'privatekey', 'presharedkey', 'uuid', 'vlessurl',
+    'wgconfig', 'wg_config', 'secret_key', 'password', 'token',
+    'text', 'data', 'items',
+    # Reality: publicKey + shortId (+ spiderX) вместе дают право на вход
+    'pbk', 'sid', 'spx',
+    # путь/имя сервиса нередко служит секретным токеном (ws, grpc, xhttp)
+    'path', 'servicename',
+    # где находится сервер
+    'server', 'host', 'sni', 'endpoint', 'remarks',
+})
+
+
 def redact_for_log(obj):
     """Убирает секреты из объекта перед записью в лог."""
-    sensitive_keys = {
-        'secretkey', 'privatekey', 'presharedkey', 'uuid', 'vlessurl',
-        'wgconfig', 'wg_config', 'secret_key', 'password', 'token', 'pbk',
-        'text', 'data', 'items'
-    }
+    sensitive_keys = SENSITIVE_LOG_KEYS
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
@@ -299,22 +401,73 @@ def redact_for_log(obj):
 
 
 # Настройка логирования с ротацией (лог не растёт безгранично)
-APP_DIR = get_app_dir()
-APP_DIR.mkdir(parents=True, exist_ok=True)
+# Права на данные приложения. В каталоге лежат config_<id>.json с UUID/приватным
+# ключом, логи и PID-файлы. На Unix файлы создавались с правами по umask (обычно
+# 0644, каталог 0755) — на многопользовательской машине их мог читать любой.
+# На Windows %LOCALAPPDATA% уже закрыт ACL текущего пользователя, там ничего не нужно.
+PRIVATE_FILE_MODE = 0o600
+PRIVATE_DIR_MODE = 0o700
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[RotatingFileHandler(
-        str(APP_DIR / 'native-host.log'),
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-        encoding='utf-8'
-    )]
-)
+
+def restrict_permissions(path, mode, enabled=None):
+    """Ограничивает права на path. Возвращает True, если права выставлены.
+
+    Best-effort: чужой владелец или ФС без chmod не должны ронять хост.
+    enabled нужен тестам — по умолчанию включено везде, кроме Windows.
+    Вызывать только после настройки logging: иначе первый же logging.warning()
+    молча настроит корневой логгер на stderr, и запись в файл уже не заработает.
+    """
+    if enabled is None:
+        enabled = os.name != 'nt'
+    if not enabled:
+        return False
+    try:
+        os.chmod(str(path), mode)
+        return True
+    except OSError as e:
+        logging.warning(f"Не удалось выставить права {oct(mode)} на {path}: {e}")
+        return False
+
+
+def write_private_text(path, text):
+    """Записывает файл сразу с правами 0600.
+
+    Права задаются при создании, а не chmod'ом постфактум: иначе между
+    созданием и chmod остаётся окно, когда ключ читаем всеми. Повторный chmod
+    нужен, если файл уже существовал — mode у os.open действует только при
+    создании.
+    """
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        f.write(text)
+    restrict_permissions(path, PRIVATE_FILE_MODE)
+
+
+try:
+    APP_DIR = get_app_dir()
+    APP_DIR.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIR_MODE)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[RotatingFileHandler(
+            str(APP_DIR / 'native-host.log'),
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding='utf-8'
+        )]
+    )
+
+    # mkdir(mode=) не трогает уже существовавший каталог, а при создании подчиняется
+    # umask — поэтому права выставляем явно, уже когда логирование настроено.
+    restrict_permissions(APP_DIR, PRIVATE_DIR_MODE)
+    restrict_permissions(APP_DIR / 'native-host.log', PRIVATE_FILE_MODE)
+except Exception as _bootstrap_error:
+    # нет прав на каталог данных, нет домашнего каталога, диск только для чтения
+    _quiet_fail('bootstrap', _bootstrap_error)
 
 if psutil is None:
-    logging.warning("psutil не установлен, остановка по PID будет через taskkill")
+    logging.warning("psutil не установлен, остановка по PID пойдёт запасным путём (taskkill / сигналы)")
 
 
 class XrayManager:
@@ -346,10 +499,18 @@ class XrayManager:
             logging.error(f"taskkill не сработал для PID {pid}: {e}")
             return False
 
-    def _stop_pid(self, pid):
-        """Остановка процесса xray по PID (psutil + taskkill-фолбэк)."""
-        if not psutil:
+    def _stop_without_psutil(self, pid):
+        """Остановка по PID, когда psutil недоступен (taskkill / сигналы)."""
+        if not is_xray_pid_alive(pid):
+            return False
+        if os.name == 'nt':
             return self._taskkill_tree(pid)
+        return posix_terminate(pid)
+
+    def _stop_pid(self, pid):
+        """Остановка процесса xray по PID (psutil + запасной путь без него)."""
+        if not psutil:
+            return self._stop_without_psutil(pid)
         try:
             if not psutil.pid_exists(pid):
                 return False
@@ -365,7 +526,7 @@ class XrayManager:
             return True
         except Exception as e:
             logging.error(f"Ошибка остановки процесса по PID {pid}: {e}")
-            return self._taskkill_tree(pid)
+            return self._stop_without_psutil(pid)
 
     def _check_existing_process(self):
         """Остановка осиротевшего Xray из прошлой сессии — ТОЛЬКО по PID-файлу.
@@ -535,9 +696,11 @@ class XrayManager:
         # Генерация конфига
         xray_config = self._generate_config(config)
 
-        # Сохранение конфига
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(xray_config, f, indent=2, ensure_ascii=False)
+        # Сохранение конфига — с UUID/приватным ключом, поэтому сразу 0600
+        write_private_text(
+            self.config_path,
+            json.dumps(xray_config, indent=2, ensure_ascii=False)
+        )
 
         logging.info(f"Конфиг сохранен: {self.config_path}")
 
@@ -550,6 +713,7 @@ class XrayManager:
         log_file = None
         try:
             log_file = open(log_path, 'w', encoding='utf-8')
+            restrict_permissions(log_path, PRIVATE_FILE_MODE)
             self.process = subprocess.Popen(
                 [str(self.xray_path), '-config', str(self.config_path)],
                 stdout=log_file,
@@ -643,27 +807,19 @@ class XrayManager:
         try:
             if self.pid_file.exists():
                 pid = int(self.pid_file.read_text().strip())
-                if psutil:
-                    if psutil.pid_exists(pid):
-                        try:
-                            if 'xray' in psutil.Process(pid).name().lower():
-                                return True, "running"
-                        except Exception:
-                            pass
-                elif os.name == 'nt':
-                    out = subprocess.run(
-                        ['tasklist', '/FI', f'PID eq {pid}', '/FI', 'IMAGENAME eq xray.exe', '/NH'],
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                        capture_output=True, text=True, timeout=5
-                    ).stdout
-                    if 'xray.exe' in out.lower():
-                        return True, "running"
+                if is_xray_pid_alive(pid):
+                    return True, "running"
         except Exception as e:
             logging.error(f"Ошибка проверки статуса по PID: {e}")
         return False, "stopped"
     
     def _socks_inbound(self):
         return {
+            # Без listen Xray слушает ВСЕ интерфейсы (проверено: порт оказывался
+            # на :: и был достижим по сетевому адресу машины). SOCKS здесь без
+            # пароля, так что любой в той же сети получал открытый прокси в
+            # туннель пользователя. Chrome ходит строго на 127.0.0.1.
+            "listen": "127.0.0.1",
             "port": self.port,
             "protocol": "socks",
             "settings": {
@@ -779,7 +935,10 @@ class XrayManager:
     def _generate_vless_config(self, config):
         """Генерация Xray конфига с VLESS outbound."""
         uuid = config.get('uuid', '')
-        server = config.get('server', '')
+        # Xray ждёт IPv6 без скобок; от расширения (в т. ч. старого) может прийти «[::1]»
+        server = (config.get('server') or '').strip()
+        if server.startswith('[') and server.endswith(']'):
+            server = server[1:-1]
         port = int(config.get('port', 443))
         encryption = config.get('encryption', 'none')
         security = config.get('security', 'tls')
@@ -927,6 +1086,15 @@ class XrayManager:
 
 
 # Native Messaging Protocol
+class MessageDecodeError(ValueError):
+    """Рамка сообщения прочитана целиком, но тело не разобралось (не UTF-8/JSON).
+
+    От обрыва заголовка или тела это отличается принципиально: поток не
+    рассинхронизирован, и хост может ответить ошибкой и жить дальше. Подкласс
+    ValueError — чтобы прежний код, ловивший ValueError, не сломался.
+    """
+
+
 def read_exactly(stream, n):
     """Читает ровно n байт (или меньше, если канал закрылся).
 
@@ -970,7 +1138,10 @@ def read_message():
         raise ValueError(
             f'Обрыв канала: тело {len(body)} из {message_length} байт'
         )
-    return json.loads(body.decode('utf-8'))
+    try:
+        return json.loads(body.decode('utf-8'))
+    except ValueError as e:  # UnicodeDecodeError и JSONDecodeError — подклассы
+        raise MessageDecodeError(f'Некорректное сообщение: {e}') from e
 
 
 def send_message(message):
@@ -983,129 +1154,179 @@ def send_message(message):
     sys.stdout.buffer.flush()
 
 
+def mask_host(host):
+    """Адрес для лога. Loopback — служебные пробы SOCKS, их показываем как есть.
+
+    Адреса серверов скрываем: пользователь прикладывает лог к обращению в
+    поддержку (TROUBLESHOOTING.md прямо об этом просит).
+    """
+    return host if host in ('127.0.0.1', 'localhost', '::1') else '***'
+
+
+def handle_message(xray_manager, message):
+    """Обрабатывает одну команду расширения и возвращает ответ.
+
+    Исключения наружу не прячет: их превращает в ответ-ошибку main(), иначе
+    одно кривое сообщение убивало хост, а вместе с ним (через atexit) и
+    работающий xray.
+    """
+    if not isinstance(message, dict):
+        return {'id': 0, 'success': False,
+                'error': 'Сообщение должно быть JSON-объектом'}
+
+    message_id = message.get('id', 0)
+    action = message.get('action', '')
+
+    response = {
+        'id': message_id,
+        'success': False
+    }
+
+    # Обработка команд
+    if action == 'start':
+        vless_url = message.get('vlessUrl', '')
+        config = message.get('config', {})
+        client_id = message.get('clientId', 'default')
+
+        success, msg, port = xray_manager.start(vless_url, config, client_id)
+        response['success'] = success
+        if success:
+            response['port'] = port
+        if not success:
+            response['error'] = msg
+        logging.info(f"Start: {msg} (port: {port})")
+
+    elif action == 'stop':
+        cid = message.get('clientId')
+        success, msg = xray_manager.stop(client_id=cid)
+        response['success'] = success
+        if not success:
+            response['error'] = msg
+        logging.info(f"Stop: {msg}")
+
+    elif action == 'ping':
+        host = message.get('host') or message.get('server')
+        try:
+            port = int(message.get('port', 443) or 443)
+        except (TypeError, ValueError):
+            port = None
+        transport = message.get('transport') or 'tcp'
+        socks_port = message.get('socksPort') or message.get('socks_port')
+        if socks_port:
+            try:
+                socks_port = int(socks_port)
+            except (TypeError, ValueError):
+                socks_port = None
+        if not host:
+            response['error'] = 'Не указан host'
+            logging.warning("Ping: нет host")
+        elif port is None or not (0 < port < 65536):
+            response['error'] = f"Некорректный порт: {message.get('port')}"
+            logging.warning("Ping: некорректный порт")
+        else:
+            try:
+                timeout = float(message.get('timeout') or 5)
+                if timeout <= 0 or timeout > 15:
+                    timeout = 5
+                ms = ping_host(
+                    host,
+                    port=port,
+                    transport=transport,
+                    socks_port=socks_port,
+                    timeout=timeout,
+                )
+                response['success'] = True
+                response['pingMs'] = ms
+                logging.info(
+                    f"Ping {transport} {mask_host(host)}:{port} socks={socks_port} -> {ms}ms"
+                )
+            except Exception as e:
+                response['error'] = str(e)
+                logging.info(f"Ping {mask_host(host)}:{port} fail: {e}")
+
+    elif action == 'protect':
+        try:
+            response['success'] = True
+            response['data'] = protect_secret(message.get('text') or '')
+        except Exception as e:
+            response['success'] = False
+            response['error'] = str(e)
+            logging.error(f"protect: {e}")
+
+    elif action == 'unprotect':
+        try:
+            response['success'] = True
+            response['data'] = unprotect_secret(message.get('text') or '')
+        except Exception as e:
+            response['success'] = False
+            response['error'] = str(e)
+            logging.error(f"unprotect: {e}")
+
+    elif action in ('protectMany', 'unprotectMany'):
+        items = message.get('items')
+        if not isinstance(items, list):
+            response['error'] = 'items должен быть списком'
+            logging.warning(f"{action}: items не список")
+        elif len(items) > MAX_SECRET_BATCH:
+            response['error'] = f'Слишком много элементов (максимум {MAX_SECRET_BATCH})'
+            logging.warning(f"{action}: {len(items)} элементов, лимит {MAX_SECRET_BATCH}")
+        else:
+            results = process_secret_batch(action, items)
+            response['success'] = True
+            response['results'] = results
+            failed = sum(1 for r in results if not r['ok'])
+            logging.info(f"{action}: {len(results)} шт., ошибок {failed}")
+
+    elif action == 'status':
+        cid = message.get('clientId')
+        if cid:
+            xray_manager._init_paths(cid)
+        is_running, status = xray_manager.is_running()
+        response['success'] = True
+        response['data'] = status
+        logging.info(f"Status: {status}")
+
+    else:
+        response['error'] = f"Неизвестная команда: {action}"
+        logging.warning(f"Неизвестная команда: {action}")
+
+    return response
+
+
 def main():
     logging.info("Native host Python запущен")
-    
+
     xray_manager = XrayManager()
     atexit.register(xray_manager._atexit_cleanup)
-    
+
     try:
         while True:
-            # Чтение сообщения
-            message = read_message()
+            # Чтение сообщения. Рамка прочитана целиком, но тело не разобралось —
+            # поток не рассинхронизирован, отвечаем ошибкой и продолжаем.
+            # Обрыв заголовка/тела (ValueError из read_message) по-прежнему
+            # фатален: после него продолжать читать из потока нельзя.
+            try:
+                message = read_message()
+            except MessageDecodeError as e:
+                logging.error(str(e))
+                send_message({'id': 0, 'success': False, 'error': str(e)})
+                continue
+
             logging.info(f"Получено сообщение: {redact_for_log(message)}")
-            
-            message_id = message.get('id', 0)
-            action = message.get('action', '')
-            
-            response = {
-                'id': message_id,
-                'success': False
-            }
-            
-            # Обработка команд
-            if action == 'start':
-                vless_url = message.get('vlessUrl', '')
-                config = message.get('config', {})
-                client_id = message.get('clientId', 'default')
-                
-                success, msg, port = xray_manager.start(vless_url, config, client_id)
-                response['success'] = success
-                if success:
-                    response['port'] = port
-                if not success:
-                    response['error'] = msg
-                logging.info(f"Start: {msg} (port: {port})")
-                
-            elif action == 'stop':
-                cid = message.get('clientId')
-                success, msg = xray_manager.stop(client_id=cid)
-                response['success'] = success
-                if not success:
-                    response['error'] = msg
-                logging.info(f"Stop: {msg}")
-            
-            elif action == 'ping':
-                host = message.get('host') or message.get('server')
-                port = int(message.get('port', 443) or 443)
-                transport = message.get('transport') or 'tcp'
-                socks_port = message.get('socksPort') or message.get('socks_port')
-                if socks_port:
-                    try:
-                        socks_port = int(socks_port)
-                    except (TypeError, ValueError):
-                        socks_port = None
-                if not host:
-                    response['error'] = 'Не указан host'
-                    logging.warning("Ping: нет host")
-                else:
-                    try:
-                        timeout = float(message.get('timeout') or 5)
-                        if timeout <= 0 or timeout > 15:
-                            timeout = 5
-                        ms = ping_host(
-                            host,
-                            port=port,
-                            transport=transport,
-                            socks_port=socks_port,
-                            timeout=timeout,
-                        )
-                        response['success'] = True
-                        response['pingMs'] = ms
-                        logging.info(
-                            f"Ping {transport} {host}:{port} socks={socks_port} -> {ms}ms"
-                        )
-                    except Exception as e:
-                        response['error'] = str(e)
-                        logging.info(f"Ping {host}:{port} fail: {e}")
-                
-            elif action == 'protect':
-                try:
-                    response['success'] = True
-                    response['data'] = protect_secret(message.get('text') or '')
-                except Exception as e:
-                    response['error'] = str(e)
-                    logging.error(f"protect: {e}")
 
-            elif action == 'unprotect':
-                try:
-                    response['success'] = True
-                    response['data'] = unprotect_secret(message.get('text') or '')
-                except Exception as e:
-                    response['error'] = str(e)
-                    logging.error(f"unprotect: {e}")
+            try:
+                response = handle_message(xray_manager, message)
+            except Exception as e:
+                logging.error(f"Ошибка обработки команды: {e}", exc_info=True)
+                response = {
+                    'id': message.get('id', 0) if isinstance(message, dict) else 0,
+                    'success': False,
+                    'error': f'Внутренняя ошибка хоста: {e}',
+                }
 
-            elif action in ('protectMany', 'unprotectMany'):
-                items = message.get('items')
-                if not isinstance(items, list):
-                    response['error'] = 'items должен быть списком'
-                    logging.warning(f"{action}: items не список")
-                elif len(items) > MAX_SECRET_BATCH:
-                    response['error'] = f'Слишком много элементов (максимум {MAX_SECRET_BATCH})'
-                    logging.warning(f"{action}: {len(items)} элементов, лимит {MAX_SECRET_BATCH}")
-                else:
-                    results = process_secret_batch(action, items)
-                    response['success'] = True
-                    response['results'] = results
-                    failed = sum(1 for r in results if not r['ok'])
-                    logging.info(f"{action}: {len(results)} шт., ошибок {failed}")
-
-            elif action == 'status':
-                cid = message.get('clientId')
-                if cid:
-                    xray_manager._init_paths(cid)
-                is_running, status = xray_manager.is_running()
-                response['success'] = True
-                response['data'] = status
-                logging.info(f"Status: {status}")
-                
-            else:
-                response['error'] = f"Неизвестная команда: {action}"
-                logging.warning(f"Неизвестная команда: {action}")
-            
             # Отправка ответа
             send_message(response)
-            
+
     except Exception as e:
         logging.error(f"Ошибка: {e}", exc_info=True)
         sys.exit(1)

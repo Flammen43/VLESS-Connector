@@ -2,7 +2,7 @@
 
 ## Требования
 
-- Python 3.6+ (`python3 --version`)
+- Python 3.7+ (`python3 --version`)
 - pip3 (`python3 -m pip --version`)
 - wget или curl
 - unzip

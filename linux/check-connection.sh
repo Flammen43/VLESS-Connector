@@ -134,6 +134,38 @@ for browser in "${!BROWSERS[@]}"; do
     fi
 done
 
+# Flatpak-браузеры: показываем только установленные (есть ~/.var/app/<id>),
+# для них важны и манифест в песочнице, и доступ песочницы к каталогу хоста.
+# Формат «app-id|каталог профиля». Список общий с quick-install.sh.
+FLATPAK_BROWSERS=(
+    "com.google.Chrome|google-chrome"
+    "org.chromium.Chromium|chromium"
+    "com.brave.Browser|BraveSoftware/Brave-Browser"
+    "com.microsoft.Edge|microsoft-edge"
+    "com.vivaldi.Vivaldi|vivaldi"
+    "ru.yandex.Browser|yandex-browser"
+)
+
+for entry in "${FLATPAK_BROWSERS[@]}"; do
+    app_id="${entry%%|*}"
+    profile_dir="${entry#*|}"
+    [ -d "$HOME/.var/app/$app_id" ] || continue
+    manifest="$HOME/.var/app/$app_id/config/$profile_dir/NativeMessagingHosts/$MANIFEST_NAME"
+    if [ -f "$manifest" ]; then
+        echo -e "${GREEN}[OK] $app_id (Flatpak) — зарегистрирован${NC}"
+    else
+        echo -e "${YELLOW}[WARN] $app_id (Flatpak) — манифеста нет, запустите quick-install.sh${NC}"
+    fi
+    if command -v flatpak >/dev/null 2>&1; then
+        if flatpak override --user --show "$app_id" 2>/dev/null | grep -qF "$INSTALL_DIR"; then
+            echo -e "${GRAY}     доступ песочницы к $INSTALL_DIR выдан${NC}"
+        else
+            echo -e "${YELLOW}[WARN] $app_id: песочница не видит $INSTALL_DIR — хост не запустится${NC}"
+            echo -e "${GRAY}     flatpak override --user --filesystem=$INSTALL_DIR $app_id${NC}"
+        fi
+    fi
+done
+
 echo ""
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}Проверка завершена${NC}"

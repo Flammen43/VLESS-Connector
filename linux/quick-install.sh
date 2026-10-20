@@ -293,22 +293,27 @@ done
 # в песочнице и читают манифесты не из ~/.config, а из своего каталога
 # ~/.var/app/<id>/config/... Без этого расширение сообщает, что native host
 # не установлен, хотя установка прошла успешно.
-declare -A FLATPAK_BROWSERS=(
-    ["com.google.Chrome"]="google-chrome"
-    ["org.chromium.Chromium"]="chromium"
-    ["com.brave.Browser"]="BraveSoftware/Brave-Browser"
-    ["com.microsoft.Edge"]="microsoft-edge"
-    ["com.vivaldi.Vivaldi"]="vivaldi"
-    ["ru.yandex.Browser"]="yandex-browser"
+# Формат «app-id|каталог профиля». Тот же список — в uninstall.sh,
+# update-extension-id.sh и check-connection.sh (tests/test_linux_scripts.py
+# следит, чтобы они не разошлись).
+FLATPAK_BROWSERS=(
+    "com.google.Chrome|google-chrome"
+    "org.chromium.Chromium|chromium"
+    "com.brave.Browser|BraveSoftware/Brave-Browser"
+    "com.microsoft.Edge|microsoft-edge"
+    "com.vivaldi.Vivaldi|vivaldi"
+    "ru.yandex.Browser|yandex-browser"
 )
 
 FLATPAK_FOUND=0
-for app_id in "${!FLATPAK_BROWSERS[@]}"; do
+for entry in "${FLATPAK_BROWSERS[@]}"; do
+    app_id="${entry%%|*}"
+    profile_dir="${entry#*|}"
     app_root="$HOME/.var/app/$app_id"
     # Каталог существует только если браузер реально установлен как Flatpak —
     # иначе не создаём мусор.
     [ -d "$app_root" ] || continue
-    dir="$app_root/config/${FLATPAK_BROWSERS[$app_id]}/NativeMessagingHosts"
+    dir="$app_root/config/$profile_dir/NativeMessagingHosts"
     mkdir -p "$dir"
     cp "$MANIFEST_PATH" "$dir/$MANIFEST_NAME"
     echo -e "${GREEN}  ✓ $app_id (Flatpak)${NC}"
@@ -347,7 +352,11 @@ for geo in geoip.dat geosite.dat; do
         || echo -e "${YELLOW}  ~ $geo (без него «российские сайты напрямую» не работает)${NC}"
 done
 
-python3 -c "import psutil" 2>/dev/null && echo -e "${GREEN}  ✓ psutil${NC}"           || echo -e "${YELLOW}  ~ psutil (опционально)${NC}"
+python3 -c "import psutil" 2>/dev/null && echo -e "${GREEN}  ✓ psutil${NC}"           || echo -e "${YELLOW}  ~ psutil (необязателен: без него хост останавливает xray сам)${NC}"
+if [ "$FLATPAK_FOUND" = "1" ]; then
+    echo -e "${GRAY}    Flatpak-браузер запускает хост в песочнице: psutil из pip --user там,${NC}"
+    echo -e "${GRAY}    как правило, недоступен. Это не проблема — хост обходится без него.${NC}"
+fi
 
 echo ""
 

@@ -114,6 +114,28 @@ for dir in "${BROWSER_DIRS[@]}"; do
     fi
 done
 
+# Flatpak-браузеры держат манифест в своей песочнице; без обновления там
+# останется старый ID, и браузер откажет хосту в доступе.
+# Формат «app-id|каталог профиля». Список общий с quick-install.sh.
+FLATPAK_BROWSERS=(
+    "com.google.Chrome|google-chrome"
+    "org.chromium.Chromium|chromium"
+    "com.brave.Browser|BraveSoftware/Brave-Browser"
+    "com.microsoft.Edge|microsoft-edge"
+    "com.vivaldi.Vivaldi|vivaldi"
+    "ru.yandex.Browser|yandex-browser"
+)
+
+for entry in "${FLATPAK_BROWSERS[@]}"; do
+    app_id="${entry%%|*}"
+    profile_dir="${entry#*|}"
+    dir="$HOME/.var/app/$app_id/config/$profile_dir/NativeMessagingHosts"
+    if [ -d "$dir" ]; then
+        cp "$MANIFEST_PATH" "$dir/$MANIFEST_NAME"
+        echo -e "${GREEN}[OK] Обновлено в $app_id (Flatpak)${NC}"
+    fi
+done
+
 echo ""
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}Extension ID обновлён!${NC}"

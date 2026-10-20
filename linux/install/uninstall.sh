@@ -42,6 +42,34 @@ for dir in "${BROWSER_DIRS[@]}"; do
         echo -e "${GREEN}[OK] Удалено из $browser_name${NC}"
     fi
 done
+
+# Flatpak-браузеры: манифест лежит в песочнице, и ещё там осталось разрешение
+# на каталог хоста, выданное установщиком.
+# Формат «app-id|каталог профиля». Список общий с quick-install.sh.
+FLATPAK_BROWSERS=(
+    "com.google.Chrome|google-chrome"
+    "org.chromium.Chromium|chromium"
+    "com.brave.Browser|BraveSoftware/Brave-Browser"
+    "com.microsoft.Edge|microsoft-edge"
+    "com.vivaldi.Vivaldi|vivaldi"
+    "ru.yandex.Browser|yandex-browser"
+)
+
+for entry in "${FLATPAK_BROWSERS[@]}"; do
+    app_id="${entry%%|*}"
+    profile_dir="${entry#*|}"
+    app_root="$HOME/.var/app/$app_id"
+    [ -d "$app_root" ] || continue
+    manifest="$app_root/config/$profile_dir/NativeMessagingHosts/$MANIFEST_NAME"
+    if [ -f "$manifest" ]; then
+        rm -f "$manifest"
+        echo -e "${GREEN}[OK] Удалено из $app_id (Flatpak)${NC}"
+    fi
+    if command -v flatpak >/dev/null 2>&1; then
+        flatpak override --user --nofilesystem="$INSTALL_DIR" "$app_id" 2>/dev/null \
+            && echo -e "${GRAY}     доступ к $INSTALL_DIR отозван${NC}"
+    fi
+done
 echo ""
 
 # --- Удаление файлов ---

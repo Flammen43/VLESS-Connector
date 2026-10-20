@@ -55,8 +55,10 @@ done
 
 # ─── [2/5] Поиск релиза ──────────────────────────────────
 step "[2/5] Поиск последнего релиза..."
+SUMS_URL=""
 if [ -n "${VLESSCHROME_BASE:-}" ]; then
     URL="${VLESSCHROME_BASE%/}/vlesschrome-${MASK}.zip"
+    SUMS_URL="${VLESSCHROME_BASE%/}/SHA256SUMS"
     ok "зеркало: $URL"
 else
     API="https://api.github.com/repos/$REPO/releases/latest"
@@ -70,6 +72,9 @@ else
         | sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)".*/\1/p' \
         | grep -- "-${MASK}-" | head -n1)"
     [ -n "$URL" ] || { fail "в релизе нет архива для $MASK"; exit 1; }
+    SUMS_URL="$(echo "$JSON" \
+        | sed -n 's/.*"browser_download_url":[[:space:]]*"\([^"]*\)".*/\1/p' \
+        | grep -- "/SHA256SUMS$" | head -n1 || true)"
     ok "$(basename "$URL")"
 fi
 
@@ -82,6 +87,43 @@ ZIP="$TMP/release.zip"
 # -C - докачивает с места обрыва, а не начинает заново.
 curl -fL --progress-bar --retry 5 --retry-delay 2 --retry-all-errors -C - -o "$ZIP" "$URL" || { fail "не удалось скачать"; exit 1; }
 ok "$(du -h "$ZIP" | cut -f1)"
+
+# Целостность. Архив исполняется целиком (в нём установщик и xray), так что
+# обрыв, подмена на зеркале или порча по дороге недопустимы. Не совпало — стоп.
+# Сумм нет (старый релиз, зеркало без них) — предупреждаем и идём дальше, чтобы
+# не сломать прежние релизы; VLESSCHROME_REQUIRE_CHECKSUM=1 делает это отказом.
+# Ограничение: суммы лежат там же, где архив, так что от взлома самого
+# источника это не защищает, только от порчи и несоответствия файлов.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+    else return 1; fi
+}
+EXPECTED=""
+if [ -n "$SUMS_URL" ] && SUMS="$(curl -fsSL --connect-timeout 20 "$SUMS_URL" 2>/dev/null)"; then
+    # точное имя, затем по маске платформы: зеркало отдаёт vlesschrome-<платформа>.zip,
+    # а в SHA256SUMS имя содержит версию Xray
+    EXPECTED="$(echo "$SUMS" | awk -v n="$(basename "$URL")" '{f=$2; sub(/^\*/,"",f)} f==n {print tolower($1); exit}')"
+    [ -n "$EXPECTED" ] || EXPECTED="$(echo "$SUMS" | awk -v m="$MASK" '{f=$2; sub(/^\*/,"",f)} index(f,m) {print tolower($1); exit}')"
+fi
+if [ -n "$EXPECTED" ]; then
+    if ! ACTUAL="$(sha256_of "$ZIP")"; then
+        fail "нет sha256sum/shasum — проверить архив нечем"
+        [ "${VLESSCHROME_REQUIRE_CHECKSUM:-}" = "1" ] && exit 1
+    elif [ "$ACTUAL" != "$EXPECTED" ]; then
+        fail "контрольная сумма не совпала — архив повреждён или подменён, установка прервана"
+        echo -e "  ${GRAY}ожидалось $EXPECTED${NC}" >&2
+        echo -e "  ${GRAY}получено  $ACTUAL${NC}" >&2
+        exit 1
+    else
+        ok "SHA-256 совпала"
+    fi
+elif [ "${VLESSCHROME_REQUIRE_CHECKSUM:-}" = "1" ]; then
+    fail "SHA256SUMS недоступен, а VLESSCHROME_REQUIRE_CHECKSUM=1 — установка прервана"
+    exit 1
+else
+    echo -e "  ${YELLOW}[!] SHA256SUMS не найден или не содержит этот архив — целостность не проверена${NC}"
+fi
 
 # ─── [4/5] Распаковка ────────────────────────────────────
 # Каталог перезаписывается целиком: в нём только распакованный релиз,

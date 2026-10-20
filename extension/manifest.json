@@ -9,9 +9,6 @@
     "nativeMessaging",
     "alarms"
   ],
-  "optional_permissions": [
-    "privacy"
-  ],
   "background": {
     "service_worker": "background.js"
   },

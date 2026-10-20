@@ -56,8 +56,7 @@ def test_parsers_are_not_duplicated_in_popup():
 def test_popup_controls_are_wired():
     popup = _read(EXT / 'popup.js')
     html = _read(EXT / 'popup.html')
-    for element_id in ('lanDirect', 'killSwitchStrict', 'webrtcProtect', 'unblockBtn',
-                       'exportProfilesBtn', 'importProfilesBtn', 'importProfilesFile'):
+    for element_id in ('lanDirect', 'exportProfilesBtn', 'importProfilesBtn', 'importProfilesFile'):
         assert f'id="{element_id}"' in html, element_id
         assert f"getElementById('{element_id}')" in popup, f'{element_id} не подключён в popup.js'
 
@@ -68,7 +67,6 @@ def test_background_uses_shared_proxy_rules():
     background = _read(EXT / 'background.js')
     assert "importScripts('proxy-rules.js', 'compat.js')" in background
     assert 'buildProxyConfig(port, lanDirect)' in background
-    assert 'buildBlockConfig(lanDirect)' in background
     # прежний жёсткий список не должен вернуться
     assert "bypassList: ['localhost'" not in background
 
@@ -81,12 +79,19 @@ def test_every_background_helper_script_is_installed_and_checked():
         assert f'"{helper}"' in check, f'{helper} не проверяется в check-installation.ps1'
 
 
-def test_privacy_permission_is_optional_not_mandatory():
+def test_removed_options_stay_removed():
+    # блокировка трафика, «Разблокировать интернет» и защита WebRTC убраны по решению
+    # владельца; без разрешения privacy расширение не просит у пользователя лишнего
     import json
     manifest = json.loads(_read(EXT / 'manifest.json'))
-    assert 'privacy' in manifest.get('optional_permissions', [])
-    # обязательное разрешение показало бы предупреждение всем, даже не включавшим опцию
     assert 'privacy' not in manifest['permissions']
+    assert 'optional_permissions' not in manifest
+    ui = _read(EXT / 'popup.html') + _read(EXT / 'popup.js') + _read(EXT / 'proxy-rules.js')
+    for marker in ('killSwitchStrict', 'webrtcProtect', 'unblockBtn', 'Разблокировать', 'buildBlockConfig', 'BLOCK_PROXY_PORT'):
+        assert marker not in ui, f'{marker} вернулся в интерфейс'
+    background = _read(EXT / 'background.js')
+    for marker in ('blockTraffic', 'applyWebRtcPolicy', 'buildBlockConfig'):
+        assert marker not in background, f'{marker} вернулся в background.js'
 
 
 # ── релиз ───────────────────────────────────────────────────────

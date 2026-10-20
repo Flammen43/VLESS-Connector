@@ -61,9 +61,6 @@ function setupEventListeners() {
   document.getElementById('profileList').addEventListener('click', handleProfileListClick);
   document.getElementById('routeRuDirect').addEventListener('change', handleRouteRuToggle);
   document.getElementById('lanDirect').addEventListener('change', handleLanToggle);
-  document.getElementById('killSwitchStrict').addEventListener('change', handleStrictToggle);
-  document.getElementById('webrtcProtect').addEventListener('change', handleWebrtcToggle);
-  document.getElementById('unblockBtn').addEventListener('click', handleUnblock);
   document.getElementById('exportProfilesBtn').addEventListener('click', handleExportProfiles);
   document.getElementById('importProfilesBtn').addEventListener('click', () => {
     document.getElementById('importProfilesFile').click();
@@ -784,60 +781,6 @@ async function loadRouteOption() {
   const { lanDirect = true } = await chrome.storage.local.get('lanDirect');
   const lanEl = document.getElementById('lanDirect');
   if (lanEl) lanEl.checked = lanDirect;
-
-  const { killSwitchStrict = false, webrtcProtect = false } =
-    await chrome.storage.local.get(['killSwitchStrict', 'webrtcProtect']);
-  document.getElementById('killSwitchStrict').checked = killSwitchStrict;
-  // Разрешение «privacy» пользователь мог отозвать в chrome://extensions — тогда
-  // защита фактически не работает, и галочка не должна врать.
-  let hasPrivacy = false;
-  try {
-    hasPrivacy = await chrome.permissions.contains({ permissions: ['privacy'] });
-  } catch (_) { /* API недоступно */ }
-  document.getElementById('webrtcProtect').checked = webrtcProtect && hasPrivacy;
-}
-
-async function handleStrictToggle(event) {
-  const enabled = event.target.checked;
-  await chrome.storage.local.set({ killSwitchStrict: enabled });
-  showSuccess(enabled
-    ? 'При обрыве трафик будет заблокирован'
-    : 'При обрыве прокси снимется (трафик пойдёт напрямую)');
-}
-
-async function handleWebrtcToggle(event) {
-  const enabled = event.target.checked;
-  const box = event.target;
-  box.disabled = true;
-  try {
-    if (enabled) {
-      // request() допустим только прямо из обработчика клика — до любых других await
-      const granted = await chrome.permissions.request({ permissions: ['privacy'] });
-      if (!granted) {
-        box.checked = false;
-        showError('Без разрешения «privacy» защита WebRTC недоступна');
-        return;
-      }
-    }
-    await chrome.storage.local.set({ webrtcProtect: enabled });
-    await chrome.runtime.sendMessage({ action: 'refreshProxy' });
-    showSuccess(enabled ? 'Защита WebRTC включена' : 'Защита WebRTC выключена');
-  } catch (error) {
-    box.checked = !enabled;
-    showError(error.message);
-  } finally {
-    box.disabled = false;
-  }
-}
-
-async function handleUnblock() {
-  try {
-    await chrome.runtime.sendMessage({ action: 'unblock' });
-    showSuccess('Интернет разблокирован — трафик идёт напрямую');
-    await updateStatus();
-  } catch (error) {
-    showError(error.message);
-  }
 }
 
 /** Предупреждение без привязки к Native Host (showError подменяет текст на «Нет связи…»). */
@@ -1002,20 +945,10 @@ async function updateStatus() {
 
       await chrome.storage.local.set({ isConnected: false, connectionStartTime: null });
     }
-    renderBlockedState(!!response.blocked);
     await showDropNoticeOnce();
   } catch (error) {
     console.error('Ошибка получения статуса:', error);
   }
-}
-
-/** Строгий kill-switch держит трафик закрытым: говорим об этом и даём выход. */
-function renderBlockedState(blocked) {
-  const status = document.getElementById('toggleStatus');
-  const unblock = document.getElementById('unblockBtn');
-  status.classList.toggle('blocked', blocked);
-  unblock.classList.toggle('hidden', !blocked);
-  if (blocked) status.textContent = 'Трафик заблокирован';
 }
 
 /** Соединение оборвалось, пока окно было закрыто: один раз объясняем, что произошло. */
@@ -1023,7 +956,7 @@ async function showDropNoticeOnce() {
   const { connectionDropped } = await chrome.storage.local.get('connectionDropped');
   if (!connectionDropped) return;
   showWarning('Соединение с VPN оборвалось, прокси снят — сейчас трафик идёт НАПРЯМУЮ. ' +
-    'Подключитесь снова. (Опция «Блокировать трафик при обрыве» закрывает такой разрыв.)');
+    'Подключитесь снова.');
   try {
     await chrome.runtime.sendMessage({ action: 'ackDrop' });
   } catch (_) { /* значок погаснет при следующем действии */ }
@@ -1034,7 +967,7 @@ function updateToggleButton(state) {
   const toggleStatus = document.getElementById('toggleStatus');
 
   toggleBtn.classList.remove('connected', 'connecting');
-  toggleStatus.classList.remove('connected', 'connecting', 'blocked');
+  toggleStatus.classList.remove('connected', 'connecting');
 
   if (state === true) {
     toggleBtn.classList.add('connected');

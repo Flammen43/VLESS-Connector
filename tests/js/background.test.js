@@ -2,16 +2,16 @@
 // Запуск: node tests/js/background.test.js (или в любом V8 — см. runBackgroundTests).
 //
 // Здесь проверяется то, что нельзя проверить на чистых функциях: порядок действий
-// при обрыве соединения, строгая блокировка, политика WebRTC, версия хоста.
+// при обрыве соединения, переключатель LAN, версия хоста, очистка остатков убранных опций.
 
 async function runBackgroundTests(src, assert) {
   const eq = (a, b, msg) => assert(JSON.stringify(a) === JSON.stringify(b), `${msg}: ждали ${JSON.stringify(b)}, получили ${JSON.stringify(a)}`);
 
   /** Новый «браузер»: хранилище, прокси, политика, значок и скриптуемый Native Host. */
-  function makeEnv({ storage = {}, privacy = false, hostVersion = '1.1.0', startFails = false } = {}) {
+  function makeEnv({ storage = {}, session = {}, privacy = false, hostVersion = '1.1.0', proxy = null, policy = null } = {}) {
     const env = {
-      store: { ...storage }, session: {}, proxy: null, proxyCalls: 0,
-      policy: null, badge: { text: '', color: '' }, xrayAlive: true, startFails, hostVersion, proxySetFails: false,
+      store: { ...storage }, session: { ...session }, proxy, policy,
+      badge: { text: '', color: '' }, xrayAlive: true, hostVersion, hostCalls: [],
     };
     const matches = (store, keys) => {
       if (keys == null) return { ...store };
@@ -26,7 +26,8 @@ async function runBackgroundTests(src, assert) {
       remove: async (keys) => { for (const k of [].concat(keys)) delete store[k]; },
     });
     const host = (m) => {
-      if (m.action === 'start') return env.startFails ? { success: false, error: 'xray не запустился' } : { success: true, port: 10808 };
+      env.hostCalls.push(m.action);
+      if (m.action === 'start') return { success: true, port: 10808 };
       if (m.action === 'status') {
         const r = { success: true, data: env.xrayAlive ? 'running' : 'stopped' };
         if (env.hostVersion != null) r.hostVersion = env.hostVersion;   // null — старый хост без поля
@@ -42,10 +43,10 @@ async function runBackgroundTests(src, assert) {
         onMessage: { addListener() {} },
         onInstalled: { addListener() {} },
         connectNative() {
-          const listeners = [], discon = [];
+          const listeners = [];
           return {
             onMessage: { addListener: (f) => listeners.push(f), removeListener() {} },
-            onDisconnect: { addListener: (f) => discon.push(f), removeListener() {} },
+            onDisconnect: { addListener() {}, removeListener() {} },
             postMessage(m) { const r = { ...host(m), id: m.id }; setTimeout(() => listeners.forEach(f => f(r)), 0); },
             disconnect() {},
           };
@@ -53,12 +54,7 @@ async function runBackgroundTests(src, assert) {
       },
       storage: { local: area(env.store), session: area(env.session) },
       proxy: { settings: {
-        set: (a, cb) => {
-          if (env.proxySetFails && a.value.rules.singleProxy.port !== 1) {   // рабочий прокси применить не удалось
-            chrome.runtime.lastError = { message: 'доступ запрещён' }; cb(); chrome.runtime.lastError = undefined; return;
-          }
-          env.proxy = a.value; env.proxyCalls++; cb();
-        },
+        set: (a, cb) => { env.proxy = a.value; cb(); },
         clear: (a, cb) => { env.proxy = null; cb(); },
       } },
       action: {
@@ -86,7 +82,6 @@ async function runBackgroundTests(src, assert) {
   }
   const connect = (t) => t.send({ action: 'connect', vlessUrl: 'vless://u@h.example:443', config: { protocol: 'vless' } });
   const kill = async (t) => { t.env.xrayAlive = false; return t.api.runKillSwitchCheck({ immediate: true }); };
-  const isBlockConfig = (p) => !!p && p.rules.singleProxy.port === 1;
 
   // ── подключение ────────────────────────────────────────────
   let t = await boot();
@@ -97,107 +92,62 @@ async function runBackgroundTests(src, assert) {
   eq((await t.send({ action: 'disconnect' })).success, true, 'отключение');
   eq(t.env.proxy, null, 'после отключения прокси снят');
 
-  // ── обрыв, обычный режим: прокси снят, но пользователь предупреждён ─
+  // ── обрыв: прокси снят, но пользователь предупреждён ───────
   t = await boot();
   await connect(t);
   const r1 = await kill(t);
   eq(r1.tripped, true, 'kill-switch сработал');
-  eq(t.env.proxy, null, 'обычный режим: прокси снят');
+  eq(t.env.proxy, null, 'прокси снят');
   assert(t.env.store.connectionDropped > 0, 'записана метка обрыва для сообщения в окне');
   eq(t.env.badge.text, '!', 'значок «!»');
   eq(t.env.badge.color, '#f59e0b', 'значок оранжевый (трафик идёт напрямую)');
-  assert(!t.env.store.blocked, 'блокировки нет');
+  eq(t.env.store.isConnected, false, 'состояние «отключено»');
   await t.send({ action: 'ackDrop' });
   assert(!('connectionDropped' in t.env.store), 'ackDrop снимает метку');
   eq(t.env.badge.text, 'OFF', 'после ackDrop значок OFF');
 
-  // ── обрыв, строгий режим: трафик закрыт ────────────────────
-  t = await boot({ storage: { killSwitchStrict: true } });
-  await connect(t);
-  await kill(t);
-  assert(isBlockConfig(t.env.proxy), 'строгий режим: прокси «в никуда», а не снят');
-  eq(t.env.store.blocked, true, 'флаг blocked записан');
-  assert(!('proxyNeedsClear' in t.env.store) || t.env.store.proxyNeedsClear === false, 'proxyNeedsClear не взведён (иначе старт браузера откроет интернет)');
-  eq(t.env.badge.color, '#ef4444', 'значок красный');
-  const st = await t.send({ action: 'getStatus' });
-  eq([st.isConnected, st.blocked], [false, true], 'getStatus сообщает о блокировке');
-  assert(!('connectionDropped' in t.env.store), 'в строгом режиме «трафик идёт напрямую» не сообщаем');
-
-  // ── из блокировки: неудачное подключение блокировку не снимает ─
-  t.env.xrayAlive = true; t.env.startFails = true;
-  let failed = false;
-  try { await connect(t); } catch (e) { failed = true; }
-  eq(failed, true, 'подключение не удалось');
-  assert(isBlockConfig(t.env.proxy), 'после неудачного подключения блокировка на месте');
-  eq(t.env.store.blocked, true, 'blocked по-прежнему true');
-
-  // ── из блокировки: Xray стартовал, но применить прокси не удалось ─
-  t.env.startFails = false; t.env.xrayAlive = true; t.env.proxySetFails = true;
-  failed = false;
-  try { await connect(t); } catch (e) { failed = true; }
-  eq(failed, true, 'подключение не удалось (прокси не применился)');
-  assert(isBlockConfig(t.env.proxy), 'cleanup после сбоя не оставляет интернет открытым: блокировка возвращена');
-  eq(t.env.store.blocked, true, 'blocked снова true');
-  t.env.proxySetFails = false;
-
-  // ── из блокировки: перезапуск браузера/worker не открывает интернет ─
-  const fresh = await boot({ storage: { ...t.env.store } });
-  assert(isBlockConfig(fresh.env.proxy), 'после перезапуска worker блокировка восстановлена');
-  eq(fresh.env.badge.text, '!', 'значок «!» после перезапуска');
-
-  // ── из блокировки: успешное подключение заменяет блокировку ─
-  t.env.startFails = false;
-  await connect(t);
-  eq(t.env.proxy.rules.singleProxy.port, 10808, 'рабочий прокси вместо блокирующего');
-  eq(t.env.store.blocked, false, 'blocked сброшен');
-
-  // ── снятие блокировки без подключения ─────────────────────
-  t = await boot({ storage: { killSwitchStrict: true } });
+  // повторное подключение после обрыва убирает метку
+  t = await boot();
   await connect(t); await kill(t);
-  assert(isBlockConfig(t.env.proxy), 'предусловие: заблокировано');
-  await t.send({ action: 'unblock' });
-  eq(t.env.proxy, null, 'unblock снимает прокси');
-  eq(t.env.store.blocked, false, 'unblock сбрасывает флаг');
-  eq(t.env.badge.text, 'OFF', 'unblock гасит значок');
+  t.env.xrayAlive = true;
+  await connect(t);
+  assert(!('connectionDropped' in t.env.store), 'успешное подключение убирает метку обрыва');
+  eq(t.env.badge.text, 'ON', 'значок снова ON');
 
-  // ── переключатель LAN при блокировке пересобирает обход ───
-  t = await boot({ storage: { killSwitchStrict: true } });
-  await connect(t); await kill(t);
+  // ── переключатель «локальная сеть напрямую» ───────────────
+  t = await boot();
+  await connect(t);
   t.env.store.lanDirect = false;
+  eq((await t.send({ action: 'refreshProxy' })).applied, true, 'refreshProxy применён при подключении');
+  assert(!t.env.proxy.rules.bypassList.includes('192.168.0.0/16'), 'LAN выключен — в обходе только loopback');
+  t.env.store.lanDirect = true;
   await t.send({ action: 'refreshProxy' });
-  assert(isBlockConfig(t.env.proxy) && !t.env.proxy.rules.bypassList.includes('192.168.0.0/16'), 'refreshProxy в блокировке учитывает lanDirect');
-
-  // ── пользователь отключился сам: блокировка не должна остаться ─
-  t = await boot({ storage: { killSwitchStrict: true } });
-  await connect(t); await kill(t);
-  await connect(t);
+  assert(t.env.proxy.rules.bypassList.includes('192.168.0.0/16'), 'LAN включён — диапазоны в обходе');
   await t.send({ action: 'disconnect' });
-  eq(t.env.proxy, null, 'ручное отключение снимает прокси');
-  eq(t.env.store.blocked, false, 'и флаг блокировки');
+  eq((await t.send({ action: 'refreshProxy' })).applied, false, 'без подключения refreshProxy ничего не меняет');
+  eq(t.env.proxy, null, 'и не поднимает прокси сам');
 
-  // ── WebRTC ────────────────────────────────────────────────
-  t = await boot({ privacy: true, storage: { webrtcProtect: true } });
-  await connect(t);
-  eq(t.env.policy, 'disable_non_proxied_udp', 'политика WebRTC включена вместе с прокси');
-  await t.send({ action: 'disconnect' });
-  eq(t.env.policy, null, 'политика снята при отключении');
+  // ── остатки убранных опций (блокировка трафика, WebRTC) ───
+  // Кто-то мог запустить сборку, где они были: прокси стоит на порту-заглушке.
+  const stale = { rules: { singleProxy: { scheme: 'socks5', host: '127.0.0.1', port: 1 }, bypassList: [] } };
+  t = await boot({ privacy: true, proxy: stale, policy: 'disable_non_proxied_udp',
+    storage: { blocked: true, webrtcProtect: true, killSwitchStrict: true } });
+  eq(t.env.proxy, null, 'прокси на порту-заглушке снят при старте');
+  eq(t.env.policy, null, 'политика WebRTC снята');
+  assert(!('blocked' in t.env.store) && !('webrtcProtect' in t.env.store) && !('killSwitchStrict' in t.env.store), 'ключи убранных опций удалены');
 
-  t = await boot({ privacy: true });
-  await connect(t);
-  eq(t.env.policy, null, 'без опции политика не трогается');
-  t.env.store.webrtcProtect = true;
-  await t.send({ action: 'refreshProxy' });
-  eq(t.env.policy, 'disable_non_proxied_udp', 'переключатель применяется сразу');
-  t.env.store.webrtcProtect = false;
-  await t.send({ action: 'refreshProxy' });
-  eq(t.env.policy, null, 'и выключается сразу');
+  // Живое соединение при этом не трогаем (только политика/ключи)
+  t = await boot({ privacy: true, policy: 'disable_non_proxied_udp', session: { swAlive: true },
+    storage: { isConnected: true, socksPort: 10808, clientId: 'client-1', webrtcProtect: true } });
+  eq(t.env.proxy && t.env.proxy.rules.singleProxy.port, 10808, 'активное подключение восстановлено, а не сброшено');
+  eq(t.env.store.isConnected, true, 'isConnected сохранён');
+  assert(!t.env.hostCalls.includes('stop'), 'Xray не останавливается');
+  eq(t.env.policy, null, 'но политика WebRTC убрана');
+  assert(!('webrtcProtect' in t.env.store), 'ключ webrtcProtect удалён');
 
-  t = await boot({ privacy: true, storage: { webrtcProtect: true, killSwitchStrict: true } });
-  await connect(t); await kill(t);
-  eq(t.env.policy, 'disable_non_proxied_udp', 'при строгой блокировке политика WebRTC не снимается');
-
-  t = await boot({ privacy: false, storage: { webrtcProtect: true } });
-  eq((await connect(t)).success, true, 'без разрешения privacy подключение работает (политика молча пропущена)');
+  // без остатков ничего лишнего не происходит
+  t = await boot();
+  eq(t.env.hostCalls.filter(a => a === 'stop').length, 0, 'чистый старт не останавливает хост');
 
   // ── версия хоста ──────────────────────────────────────────
   t = await boot({ hostVersion: '1.1.0' });

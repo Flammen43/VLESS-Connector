@@ -915,12 +915,7 @@ body::-webkit-scrollbar-thumb {
   opacity: 1;
 }
 
-.toggle-status.blocked {
-  color: var(--red, #ef4444);
-}
-
-.error-message .error-setup-link,
-.connection-meta .error-setup-link {
+.error-message .error-setup-link {
   display: inline-block;
   margin-top: 6px;
   color: var(--accent);

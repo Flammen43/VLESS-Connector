@@ -1,6 +1,6 @@
 // Background Service Worker для управления прокси и native messaging
 
-importScripts('proxy-rules.js', 'compat.js');   // buildProxyConfig/buildBlockConfig, hostCompatibility
+importScripts('proxy-rules.js', 'compat.js');   // buildProxyConfig, hostCompatibility
 
 const NATIVE_HOST_NAME = 'com.vlesschrome.host';
 
@@ -43,13 +43,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 });
 
-// state: true — подключено, false — отключено, 'blocked' — строгий kill-switch держит
-// трафик закрытым, 'dropped' — соединение оборвалось и прокси снят (трафик идёт напрямую)
+// state: true — подключено, false — отключено, 'dropped' — соединение оборвалось
+// и прокси снят (трафик идёт напрямую)
 function setBadge(state) {
-  if (state === 'blocked') {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-  } else if (state === 'dropped') {
+  if (state === 'dropped') {
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
   } else if (state) {
@@ -74,7 +71,7 @@ const initDone = (async function initBackgroundWorker() {
     await chrome.storage.session.set({ swAlive: true });
 
     const data = await chrome.storage.local.get([
-      'isConnected', 'clientId', 'socksPort', 'proxyNeedsClear', 'blocked'
+      'isConnected', 'clientId', 'socksPort', 'proxyNeedsClear', 'blocked', 'webrtcProtect'
     ]);
 
     if (data.proxyNeedsClear) {
@@ -86,19 +83,17 @@ const initDone = (async function initBackgroundWorker() {
       await chrome.storage.local.set({ proxyNeedsClear: false });
     }
 
-    // Строгий kill-switch держит трафик закрытым, пока пользователь сам не
-    // подключится или не снимет блокировку: перезапуск браузера или service
-    // worker не должен молча открыть интернет.
-    if (data.blocked && !data.isConnected) {
+    // Остатки убранных опций («блокировка трафика», «защита WebRTC»), если
+    // кто-то успел запустить сборку с ними: политика WebRTC могла остаться в
+    // Chrome (прокси-заглушку ниже снимет обычный сброс при старте). Снимаем и забываем.
+    if (data.blocked || data.webrtcProtect) {
       try {
-        await blockTraffic();
+        const webrtc = chrome.privacy && chrome.privacy.network && chrome.privacy.network.webRTCIPHandlingPolicy;
+        if (webrtc) await new Promise((resolve) => webrtc.clear({ scope: 'regular' }, resolve));
       } catch (error) {
-        console.error('Не удалось восстановить блокировку трафика:', error);
+        console.error('Очистка остатков убранных опций:', error);
       }
-      isConnected = false;
-      currentConfig = null;
-      socksPort = null;
-      return;
+      await chrome.storage.local.remove(['blocked', 'webrtcProtect', 'killSwitchStrict']);
     }
 
     if (sess.swAlive && data.isConnected) {
@@ -171,40 +166,25 @@ async function handleMessage(request) {
   }
 
   if (request.action === 'getStatus') {
-    const { blocked = false } = await chrome.storage.local.get('blocked');
-    return { isConnected, config: currentConfig, blocked: blocked && !isConnected };
+    return { isConnected, config: currentConfig };
   }
 
-  // Переключатели «локальная сеть напрямую» и «защита WebRTC»: и правило обхода,
-  // и политика живут в настройках Chrome, поэтому достаточно применить их заново
-  // — Xray трогать не нужно.
+  // Переключатель «локальная сеть напрямую»: правило обхода живёт в настройках
+  // прокси Chrome, поэтому достаточно применить их заново — Xray трогать не нужно.
   if (request.action === 'refreshProxy') {
-    const data = await chrome.storage.local.get(['isConnected', 'socksPort', 'blocked']);
+    const data = await chrome.storage.local.get(['isConnected', 'socksPort']);
     const port = socksPort || data.socksPort;
     if ((isConnected || data.isConnected) && port) {
       await setupProxy(port);
       return { success: true, applied: true };
     }
-    if (data.blocked) {
-      await blockTraffic();   // порт-заглушка тот же, но обход LAN мог измениться
-      return { success: true, applied: true };
-    }
     return { success: true, applied: false };
-  }
-
-  // Снять блокировку трафика (строгий kill-switch), не подключаясь заново.
-  if (request.action === 'unblock') {
-    await clearProxy();
-    await chrome.storage.local.set({ blocked: false });
-    setBadge(false);
-    return { success: true };
   }
 
   // Пользователь увидел сообщение об обрыве — гасим жёлтый «!» на значке.
   if (request.action === 'ackDrop') {
     await chrome.storage.local.remove('connectionDropped');
-    const { blocked = false } = await chrome.storage.local.get('blocked');
-    if (!isConnected && !blocked) setBadge(false);
+    if (!isConnected) setBadge(false);
     return { success: true };
   }
 
@@ -383,9 +363,6 @@ function nativeHostOneShot(payload) {
 // Подключение к VLESS
 async function handleConnect(vlessUrl, config) {
   let xrayStarted = false;
-  // Если подключаемся из состояния «трафик заблокирован» и попытка не удалась —
-  // блокировку нужно вернуть, а не оставить интернет открытым после cleanup.
-  const { blocked: wasBlocked = false } = await chrome.storage.local.get('blocked');
   try {
     console.log('Подключение к VLESS...');
 
@@ -439,8 +416,7 @@ async function handleConnect(vlessUrl, config) {
     await chrome.storage.local.set({
       isConnected: true,
       socksPort: response.port,
-      connectionStartTime: Date.now(),
-      blocked: false           // setupProxy выше уже заменил блокирующий прокси рабочим
+      connectionStartTime: Date.now()
     });
     await chrome.storage.local.remove('connectionDropped');
 
@@ -459,7 +435,7 @@ async function handleConnect(vlessUrl, config) {
       if (xrayStarted) {
         await handleDisconnect();
       } else {
-        if (!wasBlocked) await clearProxy();
+        await clearProxy();
         if (nativePort) { nativePort.disconnect(); nativePort = null; }
         isConnected = false;
         currentConfig = null;
@@ -467,13 +443,6 @@ async function handleConnect(vlessUrl, config) {
       }
     } catch (disconnectError) {
       console.error('Ошибка при cleanup после неудачного подключения:', disconnectError);
-    }
-    if (wasBlocked) {
-      try {
-        await blockTraffic();
-      } catch (blockError) {
-        console.error('Не удалось вернуть блокировку после неудачного подключения:', blockError);
-      }
     }
     throw error;
   }
@@ -525,12 +494,9 @@ async function runKillSwitchCheck({ immediate = false } = {}) {
 }
 
 async function tripKillSwitch() {
-  // Строгий режим (опция «Блокировать трафик при обрыве»): прокси не снимаем, а
-  // направляем в никуда — сайты не открываются, но и реальный IP не светится.
-  // Обычный режим: прокси снимается, трафик идёт напрямую (как раньше), но теперь
-  // об этом говорят значок и сообщение при открытии окна.
-  const { killSwitchStrict = false } = await chrome.storage.local.get('killSwitchStrict');
-  console.warn(`Kill-switch: локальный SOCKS мёртв — ${killSwitchStrict ? 'блокируем трафик' : 'снимаем прокси'}`);
+  // Прокси снимается, трафик идёт напрямую (как и раньше), но теперь об этом
+  // говорят значок и сообщение при открытии окна.
+  console.warn('Kill-switch: локальный SOCKS мёртв — снимаем прокси');
   isConnected = false;
   currentConfig = null;
   socksPort = null;
@@ -540,27 +506,15 @@ async function tripKillSwitch() {
     connectionStartTime: null
   });
 
-  let blockedNow = false;
-  if (killSwitchStrict) {
-    try {
-      await blockTraffic();
-      blockedNow = true;
-    } catch (e) {
-      // Не смогли закрыть — лучше снять прокси, чем оставить указывать на мёртвый порт
-      console.error('killSwitch blockTraffic:', e);
-    }
+  await chrome.storage.local.set({ proxyNeedsClear: true });
+  try {
+    await clearProxy();
+    await chrome.storage.local.set({ proxyNeedsClear: false });
+  } catch (e) {
+    console.error('killSwitch clearProxy:', e);
   }
-  if (!blockedNow) {
-    await chrome.storage.local.set({ proxyNeedsClear: true });
-    try {
-      await clearProxy();
-      await chrome.storage.local.set({ proxyNeedsClear: false });
-    } catch (e) {
-      console.error('killSwitch clearProxy:', e);
-    }
-    await chrome.storage.local.set({ connectionDropped: Date.now() });
-    setBadge('dropped');
-  }
+  await chrome.storage.local.set({ connectionDropped: Date.now() });
+  setBadge('dropped');
   try {
     const clientId = await getClientId();
     await nativeHostOneShot({ action: 'stop', clientId });
@@ -613,8 +567,7 @@ async function handleDisconnect() {
     await chrome.storage.local.set({
       isConnected: false,
       connectionStartTime: null,
-      proxyNeedsClear: false,
-      blocked: false           // пользователь отключился сам — блокировка не нужна
+      proxyNeedsClear: false
     });
     await chrome.storage.local.remove('connectionDropped');
 
@@ -648,44 +601,13 @@ function setProxyConfig(config) {
 
 async function setupProxy(port) {
   // Локальная сеть мимо туннеля — по умолчанию; отключается переключателем в popup
-  const { lanDirect = true, webrtcProtect = false } =
-    await chrome.storage.local.get(['lanDirect', 'webrtcProtect']);
-  await setProxyConfig(buildProxyConfig(port, lanDirect));
-  await applyWebRtcPolicy(webrtcProtect);
-}
-
-/** Строгий kill-switch: прокси в никуда, трафик не уходит напрямую. */
-async function blockTraffic() {
   const { lanDirect = true } = await chrome.storage.local.get('lanDirect');
-  await setProxyConfig(buildBlockConfig(lanDirect));
-  await chrome.storage.local.set({ blocked: true });
-  setBadge('blocked');
-}
-
-// Опция «Защита от утечки IP через WebRTC». Без неё сайты видят реальный IP через
-// STUN/UDP даже при работающем прокси. disable_non_proxied_udp разрешает UDP только
-// через прокси. Нужно разрешение privacy (запрашивается у пользователя по клику;
-// без него chrome.privacy нет, и это молча пропускается).
-async function applyWebRtcPolicy(enabled) {
-  const api = chrome.privacy && chrome.privacy.network && chrome.privacy.network.webRTCIPHandlingPolicy;
-  if (!api) return;
-  try {
-    await new Promise((resolve, reject) => {
-      const done = () => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve());
-      if (enabled) {
-        api.set({ value: 'disable_non_proxied_udp', scope: 'regular' }, done);
-      } else {
-        api.clear({ scope: 'regular' }, done);
-      }
-    });
-  } catch (e) {
-    console.warn('WebRTC policy:', e.message);
-  }
+  await setProxyConfig(buildProxyConfig(port, lanDirect));
 }
 
 // Отключение прокси
 async function clearProxy() {
-  await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     chrome.proxy.settings.clear(
       { scope: 'regular' },
       () => {
@@ -698,8 +620,6 @@ async function clearProxy() {
       }
     );
   });
-  // политика WebRTC действует, только пока работает прокси
-  await applyWebRtcPolicy(false);
 }
 
 // [BUG-2 FIX] Отправка сообщения в native host — с settled guard.

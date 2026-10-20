@@ -35,15 +35,6 @@ function runProxyRulesTests(R, assert) {
   eq(cfg.rules.bypassList, byDefault, 'список обхода из buildBypassList');
   eq(R.buildProxyConfig(10808, false).rules.bypassList, off, 'без LAN — только loopback');
 
-  // строгий kill-switch: прокси «в никуда», но локальная сеть по-прежнему доступна
-  const block = R.buildBlockConfig(true);
-  eq(block.rules.singleProxy.host, '127.0.0.1', 'блокировка: прокси только локальный');
-  eq(block.rules.singleProxy.port, R.BLOCK_PROXY_PORT, 'блокировка: порт-заглушка');
-  assert(block.rules.singleProxy.port < 1024, 'порт-заглушка привилегированный: Xray на нём не стартует');
-  eq(block.rules.bypassList, byDefault, 'блокировка не рвёт локальную сеть');
-  eq(R.buildBlockConfig(false).rules.bypassList, off, 'блокировка без LAN-обхода');
-  assert(!block.rules.bypassList.includes('<all>') && !block.rules.bypassList.includes('*'), 'блокировка не должна обходить всё');
-
   // результат — копия: мутация не портит общие константы
   on.push('evil.example');
   assert(!R.buildBypassList(true).includes('evil.example'), 'buildBypassList должен возвращать копию');
@@ -53,7 +44,7 @@ if (typeof module !== 'undefined' && module.exports) {
   const fs = require('fs');
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'proxy-rules.js'), 'utf8');
-  const R = new Function(`${src}; return { buildBypassList, buildProxyConfig, buildBlockConfig, BLOCK_PROXY_PORT };`)();
+  const R = new Function(`${src}; return { buildBypassList, buildProxyConfig };`)();
   let failed = 0;
   runProxyRulesTests(R, (ok, msg) => { if (!ok) { failed++; console.error('FAIL: ' + msg); } });
   console.log(failed ? `${failed} проверок не прошло` : 'ok');

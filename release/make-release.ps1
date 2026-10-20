@@ -44,7 +44,7 @@ $XRAY_ASSETS = @{
     'macos-x64'   = 'Xray-macos-64.zip'
 }
 # Что из проекта не нужно конечному пользователю.
-$EXCLUDE_DIRS = @('.git', '__pycache__', '.pytest_cache', 'tests', 'release', 'node_modules')
+$EXCLUDE_DIRS = @('.git', '.github', '__pycache__', '.pytest_cache', 'tests', 'release', 'node_modules')
 $GEO_FILES = @('geoip.dat', 'geosite.dat')
 
 function Get-LatestXrayVersion {

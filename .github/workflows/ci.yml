@@ -1,0 +1,72 @@
+# Проверки на каждый push и pull request.
+#
+# Три платформы проекта — три системы: тесты гоняются на Linux и Windows, JS-тесты
+# (разбор ссылок, правила обхода прокси) — через node, скрипты — shellcheck и
+# PSScriptAnalyzer. Раньше все ошибки упаковки (CRLF в .sh, BOM в web-install.ps1,
+# битые продолжения строк) ловились руками уже после выхода релиза.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: pytest + JS (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Зависимости
+        run: python -m pip install -r requirements-dev.txt psutil
+      - name: pytest
+        run: python -m pytest -q
+      - name: JS-тесты (прямой запуск; pytest их тоже вызывает, но тут видно отдельно)
+        run: |
+          node tests/js/links.test.js
+          node tests/js/proxy-rules.test.js
+
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck (только ошибки)
+        # -S error: у скриптов много стилевых замечаний, которые не баги; ломаем
+        # сборку только на настоящих ошибках синтаксиса и квотинга.
+        run: |
+          sudo apt-get install -y shellcheck >/dev/null
+          shellcheck -S error web-install.sh linux/*.sh linux/install/*.sh macos/*.sh macos/install/*.sh
+      - name: bash -n
+        run: |
+          for f in web-install.sh linux/*.sh linux/install/*.sh macos/*.sh macos/install/*.sh; do
+            bash -n "$f" || exit 1
+          done
+
+  powershell:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Анализ (только Error)
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
+          $issues | Format-Table -AutoSize | Out-String -Width 200
+          if ($issues) { exit 1 }
+      - name: web-install.ps1 без BOM (BOM ломает `irm | iex`)
+        shell: pwsh
+        run: |
+          $b = [IO.File]::ReadAllBytes('web-install.ps1')
+          if ($b[0] -eq 0xEF -and $b[1] -eq 0xBB) { Write-Error 'web-install.ps1 начинается с BOM'; exit 1 }

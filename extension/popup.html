@@ -104,6 +104,7 @@
         </button>
         <div class="connection-meta">
           <div id="toggleStatus" class="toggle-status">Отключено</div>
+          <button type="button" id="unblockBtn" class="error-setup-link hidden">Разблокировать интернет</button>
           <div class="connection-rows">
             <span class="conn-label">Сервер</span>
             <span id="serverInfo" class="conn-value">—</span>
@@ -128,12 +129,39 @@
           <span class="route-option-hint">Роутер, NAS, принтер. Снимите для удалённой сети</span>
         </span>
       </label>
+
+      <details class="more-options" id="moreOptions">
+        <summary>Дополнительно</summary>
+
+        <label class="route-option" for="killSwitchStrict">
+          <input type="checkbox" id="killSwitchStrict">
+          <span class="route-option-text">
+            <span class="route-option-title">Блокировать трафик при обрыве</span>
+            <span class="route-option-hint">Без VPN сайты не откроются, реальный IP не светится</span>
+          </span>
+        </label>
+
+        <label class="route-option" for="webrtcProtect">
+          <input type="checkbox" id="webrtcProtect">
+          <span class="route-option-text">
+            <span class="route-option-title">Защита от утечки IP (WebRTC)</span>
+            <span class="route-option-hint">Нужно разрешение «privacy»; может мешать звонкам</span>
+          </span>
+        </label>
+
+        <div class="more-actions">
+          <button type="button" id="exportProfilesBtn" class="file-import-btn">Экспорт профилей</button>
+          <button type="button" id="importProfilesBtn" class="file-import-btn">Импорт профилей</button>
+          <input type="file" id="importProfilesFile" accept=".json,application/json" hidden>
+        </div>
+      </details>
     </div>
 
     <div id="errorMessage" class="error-message hidden" role="status" aria-live="polite"></div>
   </div>
 
   <script src="links.js"></script>
+  <script src="compat.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

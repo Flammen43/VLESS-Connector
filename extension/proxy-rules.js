@@ -23,3 +23,25 @@ const LAN_BYPASS = [
 function buildBypassList(lanDirect = true) {
   return lanDirect ? [...LOOPBACK_BYPASS, ...LAN_BYPASS] : [...LOOPBACK_BYPASS];
 }
+
+/** Конфиг chrome.proxy: весь трафик в локальный SOCKS Xray, кроме списка обхода. */
+function buildProxyConfig(port, lanDirect = true) {
+  return {
+    mode: 'fixed_servers',
+    rules: {
+      singleProxy: { scheme: 'socks5', host: '127.0.0.1', port: port },
+      bypassList: buildBypassList(lanDirect)
+    }
+  };
+}
+
+// Порт, на котором заведомо никто не слушает: прокси «в никуда». Chrome при
+// отказе явно заданного прокси НЕ уходит на прямое соединение, страницы просто
+// не открываются (ERR_PROXY_CONNECTION_FAILED), а имена при SOCKS5 разрешает
+// сам прокси — значит, и DNS-запросов мимо туннеля нет.
+const BLOCK_PROXY_PORT = 1;
+
+/** Строгий kill-switch: пока Xray мёртв, трафик не должен идти напрямую. */
+function buildBlockConfig(lanDirect = true) {
+  return buildProxyConfig(BLOCK_PROXY_PORT, lanDirect);
+}

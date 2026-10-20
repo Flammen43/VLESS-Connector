@@ -189,7 +189,7 @@ Write-Host ""
 
 # [6/8] Расширение
 Write-Host "[6/8] Проверка файлов расширения..." -ForegroundColor White
-foreach ($f in @("manifest.json", "popup.html", "popup.js", "links.js", "proxy-rules.js", "background.js")) {
+foreach ($f in @("manifest.json", "popup.html", "popup.js", "links.js", "proxy-rules.js", "compat.js", "background.js")) {
     if (Test-Path "extension\$f") {
         Write-Ok "$f найден"
     } else {

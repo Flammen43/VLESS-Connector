@@ -1,7 +1,7 @@
 # Проверки на каждый push и pull request.
 #
 # Три платформы проекта — три системы: тесты гоняются на Linux и Windows, JS-тесты
-# (разбор ссылок, правила обхода прокси) — через node, скрипты — shellcheck и
+# (разбор ссылок, правила прокси, версии, background.js) — через node, скрипты — shellcheck и
 # PSScriptAnalyzer. Раньше все ошибки упаковки (CRLF в .sh, BOM в web-install.ps1,
 # битые продолжения строк) ловились руками уже после выхода релиза.
 name: CI
@@ -32,9 +32,12 @@ jobs:
       - name: pytest
         run: python -m pytest -q
       - name: JS-тесты (прямой запуск; pytest их тоже вызывает, но тут видно отдельно)
+        shell: bash
         run: |
-          node tests/js/links.test.js
-          node tests/js/proxy-rules.test.js
+          for f in tests/js/*.test.js; do
+            echo "== $f"
+            node "$f" || exit 1
+          done
 
   shell:
     name: shellcheck

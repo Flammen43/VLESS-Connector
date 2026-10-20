@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSavedConfig();
   await loadRouteOption();
   await updateStatus();
+  await checkHostVersion();
   uptimeInterval = setInterval(updateUptime, 1000);
   setInterval(updateStatus, 5000);
   setInterval(verifyConnectionHealth, 30000);
@@ -60,6 +61,14 @@ function setupEventListeners() {
   document.getElementById('profileList').addEventListener('click', handleProfileListClick);
   document.getElementById('routeRuDirect').addEventListener('change', handleRouteRuToggle);
   document.getElementById('lanDirect').addEventListener('change', handleLanToggle);
+  document.getElementById('killSwitchStrict').addEventListener('change', handleStrictToggle);
+  document.getElementById('webrtcProtect').addEventListener('change', handleWebrtcToggle);
+  document.getElementById('unblockBtn').addEventListener('click', handleUnblock);
+  document.getElementById('exportProfilesBtn').addEventListener('click', handleExportProfiles);
+  document.getElementById('importProfilesBtn').addEventListener('click', () => {
+    document.getElementById('importProfilesFile').click();
+  });
+  document.getElementById('importProfilesFile').addEventListener('change', handleImportProfiles);
   bindFileImport('firstConnectFileBtn', 'firstConnectFile', 'vlessUrl');
   bindFileImport('profileFormFileBtn', 'profileFormFile', 'profileFormUrl');
 }
@@ -775,6 +784,140 @@ async function loadRouteOption() {
   const { lanDirect = true } = await chrome.storage.local.get('lanDirect');
   const lanEl = document.getElementById('lanDirect');
   if (lanEl) lanEl.checked = lanDirect;
+
+  const { killSwitchStrict = false, webrtcProtect = false } =
+    await chrome.storage.local.get(['killSwitchStrict', 'webrtcProtect']);
+  document.getElementById('killSwitchStrict').checked = killSwitchStrict;
+  // Разрешение «privacy» пользователь мог отозвать в chrome://extensions — тогда
+  // защита фактически не работает, и галочка не должна врать.
+  let hasPrivacy = false;
+  try {
+    hasPrivacy = await chrome.permissions.contains({ permissions: ['privacy'] });
+  } catch (_) { /* API недоступно */ }
+  document.getElementById('webrtcProtect').checked = webrtcProtect && hasPrivacy;
+}
+
+async function handleStrictToggle(event) {
+  const enabled = event.target.checked;
+  await chrome.storage.local.set({ killSwitchStrict: enabled });
+  showSuccess(enabled
+    ? 'При обрыве трафик будет заблокирован'
+    : 'При обрыве прокси снимется (трафик пойдёт напрямую)');
+}
+
+async function handleWebrtcToggle(event) {
+  const enabled = event.target.checked;
+  const box = event.target;
+  box.disabled = true;
+  try {
+    if (enabled) {
+      // request() допустим только прямо из обработчика клика — до любых других await
+      const granted = await chrome.permissions.request({ permissions: ['privacy'] });
+      if (!granted) {
+        box.checked = false;
+        showError('Без разрешения «privacy» защита WebRTC недоступна');
+        return;
+      }
+    }
+    await chrome.storage.local.set({ webrtcProtect: enabled });
+    await chrome.runtime.sendMessage({ action: 'refreshProxy' });
+    showSuccess(enabled ? 'Защита WebRTC включена' : 'Защита WebRTC выключена');
+  } catch (error) {
+    box.checked = !enabled;
+    showError(error.message);
+  } finally {
+    box.disabled = false;
+  }
+}
+
+async function handleUnblock() {
+  try {
+    await chrome.runtime.sendMessage({ action: 'unblock' });
+    showSuccess('Интернет разблокирован — трафик идёт напрямую');
+    await updateStatus();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+/** Предупреждение без привязки к Native Host (showError подменяет текст на «Нет связи…»). */
+function showWarning(message) {
+  renderMessage('error-message', (body) => { body.textContent = message; });
+}
+
+/** Версия Native Host против версии расширения; удачный результат кешируется на сеанс. */
+async function checkHostVersion() {
+  try {
+    const cached = await chrome.storage.session.get(['hostVersionOk']);
+    if (cached.hostVersionOk === chrome.runtime.getManifest().version) return;
+    const r = await chrome.runtime.sendMessage({ action: 'hostVersion' });
+    if (!r?.success) return;   // нет связи — об этом уже говорит reportNativeHostState
+    if (r.ok) {
+      await chrome.storage.session.set({ hostVersionOk: chrome.runtime.getManifest().version });
+      return;
+    }
+    // не перебиваем более важное сообщение (обрыв, нет связи)
+    if (document.getElementById('errorMessage').classList.contains('hidden')) {
+      showWarning(r.message);
+    }
+  } catch (_) { /* проверка необязательна */ }
+}
+
+// ============================================
+// ЭКСПОРТ / ИМПОРТ ПРОФИЛЕЙ
+// ============================================
+
+function handleExportProfiles() {
+  const { json, count, skipped } = buildProfilesExport(profiles);
+  if (count === 0) {
+    showError('Нечего экспортировать: нет доступных профилей');
+    return;
+  }
+  const ok = window.confirm(
+    'Файл будет содержать ключи и UUID в открытом виде — любой, кто его получит, сможет ' +
+    'пользоваться вашими серверами. Храните его так же бережно, как пароли. Продолжить?'
+  );
+  if (!ok) return;
+
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `vless-connector-profiles-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  showSuccess(skipped ? `Экспортировано: ${count}, пропущено (заблокированы): ${skipped}` : `Экспортировано профилей: ${count}`);
+}
+
+async function handleImportProfiles(event) {
+  const input = event.target;
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const existing = profiles.map(getProfileConfigText);
+    const { profiles: incoming, errors, duplicates } = parseProfilesImport(text, validateProfileInput, existing);
+    if (incoming.length === 0) {
+      showError(errors.length
+        ? `Импортировать нечего. ${errors[0]}`
+        : (duplicates ? 'Все профили из файла уже есть' : 'В файле нет профилей'));
+      return;
+    }
+    profiles.push(...incoming);
+    if (!activeProfileId) activeProfileId = incoming[0].id;
+    await saveProfiles();
+    showProfilesView();
+    renderProfiles();
+    const notes = [];
+    if (duplicates) notes.push(`уже были: ${duplicates}`);
+    if (errors.length) notes.push(`с ошибками: ${errors.length}`);
+    showSuccess(`Импортировано: ${incoming.length}` + (notes.length ? ` (${notes.join(', ')})` : ''));
+  } catch (error) {
+    showError(error.message);
+  }
 }
 
 async function handleLanToggle(event) {
@@ -859,9 +1002,31 @@ async function updateStatus() {
 
       await chrome.storage.local.set({ isConnected: false, connectionStartTime: null });
     }
+    renderBlockedState(!!response.blocked);
+    await showDropNoticeOnce();
   } catch (error) {
     console.error('Ошибка получения статуса:', error);
   }
+}
+
+/** Строгий kill-switch держит трафик закрытым: говорим об этом и даём выход. */
+function renderBlockedState(blocked) {
+  const status = document.getElementById('toggleStatus');
+  const unblock = document.getElementById('unblockBtn');
+  status.classList.toggle('blocked', blocked);
+  unblock.classList.toggle('hidden', !blocked);
+  if (blocked) status.textContent = 'Трафик заблокирован';
+}
+
+/** Соединение оборвалось, пока окно было закрыто: один раз объясняем, что произошло. */
+async function showDropNoticeOnce() {
+  const { connectionDropped } = await chrome.storage.local.get('connectionDropped');
+  if (!connectionDropped) return;
+  showWarning('Соединение с VPN оборвалось, прокси снят — сейчас трафик идёт НАПРЯМУЮ. ' +
+    'Подключитесь снова. (Опция «Блокировать трафик при обрыве» закрывает такой разрыв.)');
+  try {
+    await chrome.runtime.sendMessage({ action: 'ackDrop' });
+  } catch (_) { /* значок погаснет при следующем действии */ }
 }
 
 function updateToggleButton(state) {
@@ -869,7 +1034,7 @@ function updateToggleButton(state) {
   const toggleStatus = document.getElementById('toggleStatus');
 
   toggleBtn.classList.remove('connected', 'connecting');
-  toggleStatus.classList.remove('connected', 'connecting');
+  toggleStatus.classList.remove('connected', 'connecting', 'blocked');
 
   if (state === true) {
     toggleBtn.classList.add('connected');

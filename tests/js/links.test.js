@@ -70,6 +70,56 @@ function runLinkTests(L, assert) {
   eq(L.parseVlessUrl('vless://u@h:443?security=none').security, 'none', 'явный none сохраняется');
   eq(L.parseVlessUrl('vless://u@h:443?security=reality&pbk=P&sid=S&flow=xtls-rprx-vision').pbk, 'P', 'reality pbk');
   throws(() => L.parseVlessUrl('not a url'), /Ошибка парсинга/, 'мусор вместо ссылки');
+
+  // ── экспорт / импорт профилей ────────────────────────────────
+  const validate = (type, text) => {
+    if (type === 'vless' && !text.startsWith('vless://')) throw new Error('Неверный формат URL');
+    if (type === 'wireguard') L.parseWireGuardConf(text); else L.parseVlessUrl(text);
+  };
+  const wgText = '[Interface]\nPrivateKey = k\n[Peer]\nPublicKey = p\nEndpoint = wg.example.com:51820';
+  const profiles = [
+    { id: 'a', type: 'vless', name: 'Один', vlessUrl: 'vless://u1@h1.example:443?security=tls#Один' },
+    { id: 'b', type: 'wireguard', name: 'WG', wgConfig: wgText },
+    { id: 'c', type: 'vless', name: 'Закрыт', vlessUrl: 'enc:v1:xxxx', locked: true },
+    { id: 'd', type: 'vless', name: 'Пустой' },
+  ];
+  const exp = L.buildProfilesExport(profiles, new Date('2026-01-02T03:04:05Z'));
+  eq(exp.count, 2, 'экспортируются только расшифрованные непустые профили');
+  eq(exp.skipped, 2, 'заблокированные и пустые пропущены');
+  assert(!exp.json.includes('enc:v1'), 'шифртекст не попадает в экспорт');
+  assert(!exp.json.includes('"id"'), 'внутренние id не экспортируются');
+  eq(JSON.parse(exp.json).exportedAt, '2026-01-02T03:04:05.000Z', 'метка времени');
+
+  let n = 0;
+  const mk = () => 'id' + (++n);
+  const imp = L.parseProfilesImport(exp.json, validate, [], mk);
+  eq(imp.profiles.length, 2, 'импорт возвращает оба профиля');
+  eq(imp.profiles[0].vlessUrl, profiles[0].vlessUrl, 'ссылка сохранилась как есть');
+  eq(imp.profiles[0].name, 'Один', 'имя берётся из ссылки');
+  eq(imp.profiles[1].type, 'wireguard', 'тип WireGuard');
+  eq(imp.profiles[1].name, 'wg.example.com', 'имя WireGuard из endpoint');
+  eq(imp.profiles.map(p => p.id), ['id1', 'id2'], 'новые id');
+
+  const again = L.parseProfilesImport(exp.json, validate, [profiles[0].vlessUrl, wgText]);
+  eq(again.profiles.length, 0, 'повторный импорт не плодит дубликаты');
+  eq(again.duplicates, 2, 'дубликаты посчитаны');
+
+  const dirty = JSON.stringify({ format: 'vless-connector-profiles', version: 1, profiles: [
+    { type: 'vless', config: 'vless://ok@h.example:443#ok' },
+    { type: 'vless', config: 'http://not-vless' },
+    { type: 'vless', config: '' },
+    null,
+    { type: 'wireguard', config: '[Interface]' },
+  ] });
+  const part = L.parseProfilesImport(dirty, validate);
+  eq(part.profiles.length, 1, 'хорошие профили импортируются, плохие — нет');
+  eq(part.errors.length, 4, 'каждая плохая запись даёт причину');
+  assert(part.errors.some(e => /№2/.test(e) && /URL/.test(e)), 'причина указывает номер записи');
+
+  throws(() => L.parseProfilesImport('not json', validate), /не JSON/, 'не JSON');
+  throws(() => L.parseProfilesImport('{"a":1}', validate), /не похож на экспорт/, 'чужой JSON');
+  throws(() => L.parseProfilesImport(JSON.stringify({ format: 'vless-connector-profiles', version: 99, profiles: [] }), validate), /новой/, 'более новая версия формата');
+  eq(L.parseProfilesImport('﻿' + exp.json, validate).profiles.length, 2, 'BOM в начале файла не мешает');
 }
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -77,7 +127,8 @@ if (typeof module !== 'undefined' && module.exports) {
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'extension', 'links.js'), 'utf8');
   const L = new Function(`${src}; return { safeDecode, stripBrackets, formatHostPort, extractProfileName,
-    parseWireGuardConf, parseEndpoint, extractWireGuardProfileName, parseVlessUrl };`)();
+    parseWireGuardConf, parseEndpoint, extractWireGuardProfileName, parseVlessUrl,
+    buildProfilesExport, parseProfilesImport, profileConfigText };`)();
   let failed = 0;
   runLinkTests(L, (ok, msg) => { if (!ok) { failed++; console.error('FAIL: ' + msg); } });
   console.log(failed ? `${failed} проверок не прошло` : 'ok');

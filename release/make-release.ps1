@@ -254,7 +254,10 @@ function New-ReleaseArchive {
 
     # 3. Упаковка
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-    $name = "vlesschrome-$Plat-xray$Version.zip"
+    # Версия проекта в имени: по одному имени файла видно, что это за релиз. Платформа
+    # обязана остаться между дефисами (-win-x64-): по ней web-install.* выбирает архив.
+    $projectVersion = (Get-Content (Join-Path $projectDir "extension\manifest.json") -Raw | ConvertFrom-Json).version
+    $name = "vlesschrome-v$projectVersion-$Plat-xray$Version.zip"
     $out = Join-Path $OutDir $name
     if (Test-Path $out) { Remove-Item $out -Force }
 

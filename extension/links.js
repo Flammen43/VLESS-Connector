@@ -192,3 +192,81 @@ function parseVlessUrl(url) {
     throw new Error(`Ошибка парсинга URL: ${error.message}`);
   }
 }
+
+// ── Экспорт и импорт профилей ───────────────────────────────────────────────
+
+const PROFILES_EXPORT_FORMAT = 'vless-connector-profiles';
+const PROFILES_EXPORT_VERSION = 1;
+
+/** Текст конфига профиля (vless-ссылка или WireGuard .conf). */
+function profileConfigText(profile) {
+  return profile && profile.type === 'wireguard' ? (profile.wgConfig || '') : ((profile && profile.vlessUrl) || '');
+}
+
+/** Профили → JSON. Файл содержит ключи в открытом виде — UI предупреждает об этом.
+ *  Заблокированные (нерасшифрованные) профили пропускаются: в них ciphertext. */
+function buildProfilesExport(profiles, now = new Date()) {
+  const items = [];
+  let skipped = 0;
+  for (const p of profiles) {
+    const text = profileConfigText(p);
+    if (p.locked || !text) { skipped += 1; continue; }
+    items.push({ name: p.name || '', type: p.type === 'wireguard' ? 'wireguard' : 'vless', config: text });
+  }
+  return {
+    json: JSON.stringify({
+      format: PROFILES_EXPORT_FORMAT,
+      version: PROFILES_EXPORT_VERSION,
+      exportedAt: now.toISOString(),
+      profiles: items
+    }, null, 2),
+    count: items.length,
+    skipped
+  };
+}
+
+/** JSON → профили для добавления. validate(type, text) бросает на некорректном конфиге.
+ *  existingTexts — конфиги, которые уже есть (дубликаты пропускаются).
+ *  Ничего не бросает на мусоре в элементах: возвращает причины в errors. */
+function parseProfilesImport(text, validate, existingTexts = [], makeId = () => crypto.randomUUID()) {
+  let data;
+  try {
+    data = JSON.parse(String(text).replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('Файл не похож на экспорт профилей (не JSON)');
+  }
+  if (!data || data.format !== PROFILES_EXPORT_FORMAT || !Array.isArray(data.profiles)) {
+    throw new Error('Файл не похож на экспорт профилей этого расширения');
+  }
+  if (data.version > PROFILES_EXPORT_VERSION) {
+    throw new Error('Файл создан более новой версией расширения — обновите расширение');
+  }
+
+  const seen = new Set(existingTexts.map(t => String(t).trim()));
+  const profiles = [];
+  const errors = [];
+  let duplicates = 0;
+  data.profiles.forEach((item, i) => {
+    const type = item && item.type === 'wireguard' ? 'wireguard' : 'vless';
+    const config = item && typeof item.config === 'string' ? item.config.trim() : '';
+    if (!config) { errors.push(`№${i + 1}: пустой конфиг`); return; }
+    if (seen.has(config)) { duplicates += 1; return; }
+    try {
+      validate(type, config);
+    } catch (e) {
+      errors.push(`№${i + 1}: ${e.message}`);
+      return;
+    }
+    seen.add(config);
+    const profile = { id: makeId(), type };
+    if (type === 'wireguard') {
+      profile.wgConfig = config;
+      profile.name = extractWireGuardProfileName(config);
+    } else {
+      profile.vlessUrl = config;
+      profile.name = extractProfileName(config);
+    }
+    profiles.push(profile);
+  });
+  return { profiles, errors, duplicates };
+}

@@ -343,8 +343,34 @@ body::-webkit-scrollbar-thumb {
    селекторы — форма стоит в разметке перед этими блоками. */
 #profileForm.open ~ .profile-list,
 #profileForm.open ~ .connection-card,
-#profileForm.open ~ .route-option {
+#profileForm.open ~ .route-option,
+#profileForm.open ~ .more-options {
   display: none;
+}
+
+.more-options {
+  margin-top: 6px;
+}
+
+.more-options summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 2px;
+}
+
+.more-options .route-option {
+  margin-top: 6px;
+}
+
+.more-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.more-actions .file-import-btn {
+  flex: 1;
 }
 
 .profile-form-inner {
@@ -889,7 +915,12 @@ body::-webkit-scrollbar-thumb {
   opacity: 1;
 }
 
-.error-message .error-setup-link {
+.toggle-status.blocked {
+  color: var(--red, #ef4444);
+}
+
+.error-message .error-setup-link,
+.connection-meta .error-setup-link {
   display: inline-block;
   margin-top: 6px;
   color: var(--accent);

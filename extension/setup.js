@@ -1,10 +1,18 @@
 let extensionId = '';
 let manifestConfigured = false;
+let platformOs = 'unknown';
+let hints = null;   // подсказки текущей ОС (platform.js); null — ОС не поддерживается
+
+/** Как называть установщик в сообщениях об ошибках. */
+function installerName() {
+  return hints ? hints.installCmd : 'установщик';
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   extensionId = chrome.runtime.id;
   document.getElementById('extensionId').textContent = extensionId;
 
+  await applyPlatform();
   await loadSavedProjectPath();
   await checkAllSteps();
 
@@ -16,6 +24,65 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('refreshStatusBtn').addEventListener('click', refreshStatus);
   document.getElementById('closeBtn').addEventListener('click', () => window.close());
 });
+
+// ============================================
+// ПЛАТФОРМА
+// ============================================
+
+/** Подставляет команды и пути той ОС, на которой открыта страница. */
+async function applyPlatform() {
+  let apiOs = null;
+  try {
+    apiOs = (await chrome.runtime.getPlatformInfo()).os;
+  } catch {
+    // нет API — определим по User-Agent
+  }
+  platformOs = detectOs(apiOs, navigator.userAgent);
+  hints = platformHints(platformOs);
+
+  if (!hints) {
+    const box = document.getElementById('unsupportedBox');
+    box.textContent = `Платформа «${platformOs}» не поддерживается: установщики есть для Windows, macOS и Linux.`;
+    box.classList.remove('hidden');
+    document.getElementById('showPathToggle').classList.add('hidden');
+    document.getElementById('pathDetail').classList.add('hidden');
+    // значения по умолчанию в HTML — для Windows, на другой ОС они вводят в заблуждение
+    document.getElementById('installCmd').textContent = 'установщик';
+    document.getElementById('dataDirText').textContent = '—';
+    document.getElementById('logFileText').textContent = '—';
+    document.getElementById('checkLine').classList.add('hidden');
+    return;
+  }
+
+  document.getElementById('installCmd').textContent = hints.installCmd;
+  document.getElementById('dataDirText').textContent = hints.dataDir;
+  document.getElementById('logFileText').textContent = hints.logFile;
+
+  const checkLine = document.getElementById('checkLine');
+  if (hints.checkCmd) {
+    document.getElementById('checkCmdText').textContent = hints.checkCmd;
+  } else {
+    checkLine.classList.add('hidden');
+  }
+
+  const list = document.getElementById('howToList');
+  list.textContent = '';
+  for (const item of hints.howTo) {
+    const strong = document.createElement('strong');
+    strong.textContent = item.title + ':';
+    list.append(strong, ' ');
+    for (const part of item.parts) {
+      if (typeof part === 'string') {
+        list.append(part);
+      } else {
+        const code = document.createElement('code');
+        code.textContent = part.code;
+        list.append(code);
+      }
+    }
+    list.append(document.createElement('br'), document.createElement('br'));
+  }
+}
 
 // ============================================
 // TOAST (замена alert)
@@ -61,11 +128,11 @@ async function copyExtensionId() {
 }
 
 async function copyFolderPath() {
-  const path = '%LOCALAPPDATA%\\VLESSChrome';
+  const path = hints ? hints.dataDir : '%LOCALAPPDATA%\\VLESSChrome';
   try {
     await navigator.clipboard.writeText(path);
     showInlineFeedback('pathCopyFeedback');
-    showToast('Путь скопирован. Вставьте в адресную строку Проводника.', 'ok');
+    showToast('Путь скопирован. ' + (hints ? hints.pasteTip : ''), 'ok');
   } catch {
     showToast('Скопируйте вручную: ' + path, 'info', 6000);
   }
@@ -230,7 +297,7 @@ function showStatusPanel(status) {
   if (status.configured) {
     details.innerHTML += '<div class="status-row" style="margin-top:8px;"><span class="val ok" style="width:100%;text-align:center;">Готово к использованию</span></div>';
   } else {
-    details.innerHTML += '<div class="status-row" style="margin-top:8px;"><span class="val warn" style="width:100%;text-align:center;">Запустите install.bat</span></div>';
+    details.innerHTML += `<div class="status-row" style="margin-top:8px;"><span class="val warn" style="width:100%;text-align:center;">Запустите ${installerName()}</span></div>`;
   }
 }
 
@@ -247,14 +314,14 @@ async function testConnection() {
     const response = await chrome.runtime.sendMessage({ action: 'pingNative' });
 
     if (!response || !response.success) {
-      showToast('Native Host не отвечает. Запустите install.bat в корне проекта.', 'err', 5000);
+      showToast(`Native Host не отвечает. Запустите ${installerName()} в корне проекта.`, 'err', 5000);
       updateStep(2, 'err', '✗');
     } else {
       showToast('Native Host отвечает! Можно использовать расширение.', 'ok', 5000);
       await checkAllSteps();
     }
   } catch (error) {
-    showToast('Ошибка: ' + error.message + '. Запустите install.bat и повторите.', 'err', 6000);
+    showToast('Ошибка: ' + error.message + `. Запустите ${installerName()} и повторите.`, 'err', 6000);
     updateStep(2, 'err', '✗');
   } finally {
     btn.disabled = false;
@@ -270,7 +337,7 @@ async function loadSavedProjectPath() {
   try {
     const data = await chrome.storage.local.get(['projectPath']);
     if (data.projectPath) {
-      document.getElementById('savedPathText').textContent = data.projectPath + '\\install.bat';
+      document.getElementById('savedPathText').textContent = installerPath(data.projectPath, platformOs);
       document.getElementById('savedPathInfo').classList.remove('hidden');
     }
   } catch {

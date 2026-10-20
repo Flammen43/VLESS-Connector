@@ -120,11 +120,20 @@
           <span class="route-option-hint">Мимо VPN, ваш реальный IP</span>
         </span>
       </label>
+
+      <label class="route-option" for="lanDirect">
+        <input type="checkbox" id="lanDirect" checked>
+        <span class="route-option-text">
+          <span class="route-option-title">Локальная сеть — напрямую</span>
+          <span class="route-option-hint">Роутер, NAS, принтер. Снимите для удалённой сети</span>
+        </span>
+      </label>
     </div>
 
     <div id="errorMessage" class="error-message hidden" role="status" aria-live="polite"></div>
   </div>
 
+  <script src="links.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

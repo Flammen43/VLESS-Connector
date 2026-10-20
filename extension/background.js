@@ -1,5 +1,7 @@
 // Background Service Worker для управления прокси и native messaging
 
+importScripts('proxy-rules.js');   // buildBypassList
+
 const NATIVE_HOST_NAME = 'com.vlesschrome.host';
 
 let nativePort = null;
@@ -147,6 +149,16 @@ async function handleMessage(request) {
 
   if (request.action === 'getStatus') {
     return { isConnected, config: currentConfig };
+  }
+
+  // Переключатель «локальная сеть напрямую»: правило обхода живёт в настройках
+  // прокси Chrome, поэтому достаточно применить их заново — Xray трогать не нужно.
+  if (request.action === 'refreshProxy') {
+    const data = await chrome.storage.local.get(['isConnected', 'socksPort']);
+    const port = socksPort || data.socksPort;
+    if (!(isConnected || data.isConnected) || !port) return { success: true, applied: false };
+    await setupProxy(port);
+    return { success: true, applied: true };
   }
 
   if (request.action === 'pingNative') {
@@ -526,6 +538,8 @@ async function handleDisconnect() {
 
 // Настройка прокси в Chrome
 async function setupProxy(port) {
+  // Локальная сеть мимо туннеля — по умолчанию; отключается переключателем в popup
+  const { lanDirect = true } = await chrome.storage.local.get('lanDirect');
   return new Promise((resolve, reject) => {
     const config = {
       mode: 'fixed_servers',
@@ -535,7 +549,7 @@ async function setupProxy(port) {
           host: '127.0.0.1',
           port: port
         },
-        bypassList: ['localhost', '127.0.0.1', '<local>']
+        bypassList: buildBypassList(lanDirect)
       }
     };
 

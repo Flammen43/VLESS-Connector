@@ -363,8 +363,9 @@
           <span class="step-badge" id="step1-badge"></span>
         </div>
         <p>Расширение управляет Xray через небольшую программу-посредник. Запустите
-           <code>install.bat</code> в корне проекта VLESSCHROME — он поставит всё сам:
+           <code id="installCmd">install.bat</code> в корне проекта VLESSCHROME — он поставит всё сам:
            зависимости, Xray и регистрацию в браузере.</p>
+        <div id="unsupportedBox" class="id-mismatch hidden"></div>
         <div id="savedPathInfo" class="saved-path-block hidden">
           <div class="detail-box">
             <strong>Путь к установщику:</strong><br>
@@ -376,10 +377,12 @@
         </button>
         <div class="detail-content" id="pathDetail">
           <div class="detail-box">
-            <strong>Через Проводник:</strong> откройте папку проекта VLESSCHROME и запустите
-            <code>install.bat</code> двойным кликом.<br><br>
-            <strong>Через командную строку:</strong> Win+R → <code>cmd</code> →
-            <code>cd "путь\к\VLESSCHROME"</code> → <code>install.bat</code><br><br>
+            <div id="howToList">
+              <strong>Через Проводник:</strong> откройте папку проекта VLESSCHROME и запустите
+              <code>install.bat</code> двойным кликом.<br><br>
+              <strong>Через командную строку:</strong> Win+R → <code>cmd</code> →
+              <code>cd "путь\к\VLESSCHROME"</code> → <code>install.bat</code><br><br>
+            </div>
             Копировать Extension ID и перезапускать браузер не нужно — ID расширения
             задан заранее полем <code>key</code> в манифесте.
           </div>
@@ -413,12 +416,12 @@
           <button class="btn btn-s" id="copyIdBtn">Копировать ID</button>
           <span id="copyFeedback" class="inline-feedback">Скопировано!</span>
           <div class="divider"></div>
-          <strong>Папка установки:</strong> <code>%LOCALAPPDATA%\VLESSChrome</code><br>
+          <strong>Папка установки:</strong> <code id="dataDirText" class="path-code">%LOCALAPPDATA%\VLESSChrome</code><br>
           <button class="btn btn-s" id="openFolderBtn">Копировать путь</button>
           <span id="pathCopyFeedback" class="inline-feedback">Скопировано!</span>
           <div class="divider"></div>
-          Логи: <code>%LOCALAPPDATA%\VLESSChrome\native-host.log</code><br>
-          Полная проверка: <code>check-installation.bat</code> в корне проекта.
+          Логи: <code id="logFileText" class="path-code">%LOCALAPPDATA%\VLESSChrome\native-host.log</code><br>
+          <span id="checkLine">Полная проверка: <code id="checkCmdText">check-installation.bat</code> в корне проекта.</span>
         </div>
       </details>
     </div>
@@ -431,6 +434,7 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="platform.js"></script>
   <script src="setup.js"></script>
 </body>
 </html>

@@ -9,7 +9,16 @@ let profileFormType = 'vless';
 // Удаление необратимо (конфиг больше нигде не хранится), поэтому в два шага.
 let pendingDeleteId = null;
 
-const ENC_PREFIX = 'enc:v1:';
+// Префиксы шифртекста обязаны совпадать с dpapi_store.py (ENC_PREFIX*):
+//   enc:v1: — Windows, DPAPI
+//   enc:v2: — macOS и Linux, ключ в Связке ключей/keyring + Fernet
+// Неузнанный префикс опасен: шифртекст принимается за обычный конфиг, не
+// уходит на расшифровку, и при следующем открытии вместо ссылки пользователь
+// видит «обрезанную» абракадабру enc:v2:..., а подключение падает.
+// Сверку с хостом держит tests/test_prefix_parity.py.
+const ENC_PREFIXES = ['enc:v1:', 'enc:v2:'];
+const isEncrypted = (value) =>
+  typeof value === 'string' && ENC_PREFIXES.some((p) => value.startsWith(p));
 const SECRET_FIELDS = ['vlessUrl', 'wgConfig'];
 
 const WG_PLACEHOLDER = `[Interface]
@@ -50,6 +59,7 @@ function setupEventListeners() {
   document.getElementById('toggleBtn').addEventListener('click', handleToggle);
   document.getElementById('profileList').addEventListener('click', handleProfileListClick);
   document.getElementById('routeRuDirect').addEventListener('change', handleRouteRuToggle);
+  document.getElementById('lanDirect').addEventListener('change', handleLanToggle);
   bindFileImport('firstConnectFileBtn', 'firstConnectFile', 'vlessUrl');
   bindFileImport('profileFormFileBtn', 'profileFormFile', 'profileFormUrl');
 }
@@ -222,7 +232,7 @@ async function loadSavedConfig() {
         for (const field of SECRET_FIELDS) {
           const value = profile[field];
           if (!value) continue;
-          if (value.startsWith(ENC_PREFIX)) {
+          if (isEncrypted(value)) {
             jobs.push({ profile, field });
           } else {
             hadPlaintextSecrets = true;
@@ -337,16 +347,6 @@ async function saveProfiles() {
 
 function getActiveProfile() {
   return profiles.find(p => p.id === activeProfileId) || null;
-}
-
-function extractProfileName(vlessUrl) {
-  try {
-    const urlObj = new URL(vlessUrl);
-    const remarks = decodeURIComponent(urlObj.hash.substring(1));
-    return remarks || 'VLESS Server';
-  } catch {
-    return 'VLESS Server';
-  }
 }
 
 // ============================================
@@ -771,6 +771,25 @@ async function loadRouteOption() {
   const { routeRuDirect = false } = await chrome.storage.local.get('routeRuDirect');
   const el = document.getElementById('routeRuDirect');
   if (el) el.checked = routeRuDirect;
+
+  const { lanDirect = true } = await chrome.storage.local.get('lanDirect');
+  const lanEl = document.getElementById('lanDirect');
+  if (lanEl) lanEl.checked = lanDirect;
+}
+
+async function handleLanToggle(event) {
+  const enabled = event.target.checked;
+  await chrome.storage.local.set({ lanDirect: enabled });
+  event.target.disabled = true;
+  try {
+    // Если подключены — применяем сразу (Xray при этом не перезапускается)
+    await chrome.runtime.sendMessage({ action: 'refreshProxy' });
+    showSuccess(enabled ? 'Локальная сеть пойдёт напрямую' : 'Локальная сеть пойдёт через VPN');
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    event.target.disabled = false;
+  }
 }
 
 async function handleRouteRuToggle(event) {
@@ -806,147 +825,7 @@ function getProfileServerLabel(profile, config) {
     const endpoint = config.peers?.[0]?.endpoint || 'WireGuard';
     return endpoint;
   }
-  return `${config.server}:${config.port}`;
-}
-
-function parseWireGuardConf(text) {
-  const interfaceSection = {};
-  const peers = [];
-  let current = null;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-
-    const sectionMatch = line.match(/^\[(.+)\]$/);
-    if (sectionMatch) {
-      const section = sectionMatch[1].trim().toLowerCase();
-      if (section === 'interface') current = 'interface';
-      else if (section === 'peer') {
-        current = 'peer';
-        peers.push({});
-      } else current = null;
-      continue;
-    }
-
-    const eq = line.indexOf('=');
-    if (eq === -1 || !current) continue;
-
-    const key = line.slice(0, eq).trim().toLowerCase();
-    const value = line.slice(eq + 1).trim();
-
-    if (current === 'interface') {
-      if (key === 'address') {
-        if (!interfaceSection.address) interfaceSection.address = [];
-        interfaceSection.address.push(...value.split(',').map(s => s.trim()).filter(Boolean));
-      } else {
-        interfaceSection[key] = value;
-      }
-    } else if (current === 'peer' && peers.length) {
-      if (key === 'allowedips') {
-        if (!peers[peers.length - 1].allowedips) peers[peers.length - 1].allowedips = [];
-        peers[peers.length - 1].allowedips.push(...value.split(',').map(s => s.trim()).filter(Boolean));
-      } else {
-        peers[peers.length - 1][key] = value;
-      }
-    }
-  }
-
-  const secretKey = interfaceSection.privatekey;
-  if (!secretKey) throw new Error('В конфиге нет PrivateKey ([Interface])');
-  if (!peers.length) throw new Error('В конфиге нет секции [Peer]');
-
-  const xrayPeers = peers.map((peer) => {
-    const publicKey = peer.publickey;
-    const endpoint = peer.endpoint;
-    if (!publicKey || !endpoint) {
-      throw new Error('В [Peer] нужны PublicKey и Endpoint');
-    }
-    const entry = {
-      publicKey,
-      endpoint,
-      allowedIPs: peer.allowedips?.length ? peer.allowedips : ['0.0.0.0/0'],
-      keepAlive: parseInt(peer.persistentkeepalive || peer.keepalive || '0', 10) || 0
-    };
-    if (peer.presharedkey) entry.preSharedKey = peer.presharedkey;
-    return entry;
-  });
-
-  const config = {
-    protocol: 'wireguard',
-    secretKey,
-    peers: xrayPeers,
-    mtu: parseInt(interfaceSection.mtu || '1420', 10) || 1420
-  };
-  if (interfaceSection.address?.length) {
-    config.address = interfaceSection.address;
-  }
-  if (interfaceSection.dns) {
-    config.dns = interfaceSection.dns.split(',').map(s => s.trim()).filter(Boolean);
-  }
-  return config;
-}
-
-function parseEndpoint(endpoint) {
-  if (!endpoint) return { host: '', port: 51820 };
-  if (endpoint.startsWith('[')) {
-    const m = endpoint.match(/^\[([^\]]+)\]:(\d+)$/);
-    if (m) return { host: m[1], port: parseInt(m[2], 10) };
-  }
-  const idx = endpoint.lastIndexOf(':');
-  if (idx === -1) return { host: endpoint, port: 51820 };
-  return {
-    host: endpoint.slice(0, idx),
-    port: parseInt(endpoint.slice(idx + 1), 10) || 51820
-  };
-}
-
-function extractWireGuardProfileName(text) {
-  try {
-    const config = parseWireGuardConf(text);
-    const endpoint = config.peers[0]?.endpoint;
-    if (endpoint) {
-      return parseEndpoint(endpoint).host || 'WireGuard';
-    }
-  } catch (_) { /* ignore */ }
-  return 'WireGuard';
-}
-
-function parseVlessUrl(url) {
-  try {
-    const urlObj = new URL(url);
-
-    const uuid = urlObj.username || urlObj.pathname.split('@')[0].replace('//', '');
-    const server = urlObj.hostname;
-    const port = urlObj.port ? parseInt(urlObj.port, 10) : 443;
-
-    const params = new URLSearchParams(urlObj.search);
-
-    return {
-      protocol: 'vless',
-      uuid: uuid,
-      server: server,
-      port: port || 443,
-      encryption: params.get('encryption') || 'none',
-      security: params.get('security') || 'tls',
-      type: params.get('type') || 'tcp',
-      host: params.get('host') || params.get('sni') || server,
-      path: params.get('path') || params.get('serviceName') || '/',
-      sni: params.get('sni') || params.get('host') || server,
-      alpn: params.get('alpn') || '',
-      fingerprint: params.get('fp') || params.get('fingerprint') || 'chrome',
-      remarks: decodeURIComponent(urlObj.hash.substring(1)) || 'VLESS Server',
-      flow: params.get('flow') || '',
-      pbk: params.get('pbk') || '',
-      sid: params.get('sid') || '',
-      spx: params.get('spx') || '',
-      // Режим транспорта xhttp (auto / packet-up / stream-up / stream-one).
-      // Без него ссылки вида ?type=xhttp&mode=... теряли настройку.
-      mode: params.get('mode') || ''
-    };
-  } catch (error) {
-    throw new Error(`Ошибка парсинга URL: ${error.message}`);
-  }
+  return formatHostPort(config.server, config.port);
 }
 
 // ============================================

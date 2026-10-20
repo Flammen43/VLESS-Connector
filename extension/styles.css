@@ -805,6 +805,10 @@ body::-webkit-scrollbar-thumb {
   transition: border-color 0.2s;
 }
 
+.route-option + .route-option {
+  margin-top: 6px;
+}
+
 .route-option:hover {
   border-color: var(--accent);
 }

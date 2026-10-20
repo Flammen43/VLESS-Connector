@@ -336,6 +336,12 @@ def get_xray_binary_name():
     return 'xray.exe' if os.name == 'nt' else 'xray'
 
 
+# Версия хоста. Расширение и хост обновляются раздельно (установщик копирует
+# их независимо), и расширение сверяет версии, чтобы сказать «хост устарел», а не
+# падать на неизвестной команде. Должна совпадать с version в extension/manifest.json
+# (проверяет tests/test_versions.py).
+HOST_VERSION = '1.1.0'
+
 # Режимы транспорта xhttp. Значения сверены с самим xray: неизвестный режим
 # он не игнорирует, а отказывается стартовать («unsupported mode»).
 XHTTP_MODES = ('auto', 'packet-up', 'stream-up', 'stream-one')
@@ -1284,6 +1290,7 @@ def handle_message(xray_manager, message):
         is_running, status = xray_manager.is_running()
         response['success'] = True
         response['data'] = status
+        response['hostVersion'] = HOST_VERSION
         logging.info(f"Status: {status}")
 
     else:

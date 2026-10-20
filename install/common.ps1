@@ -39,6 +39,205 @@ function Remove-FileQuiet($path) {
     try { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue } catch { }
 }
 
+function Remove-DirQuiet($path) {
+    if (-not $path) { return }
+    try { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+}
+
+function Remove-DirectoryChecked {
+    <#
+        Удаляет каталог и ЧЕСТНО сообщает результат. Remove-Item с
+        SilentlyContinue молчит о занятых файлах, и «Удалено» печаталось даже
+        тогда, когда половина каталога осталась на диске.
+
+        Возвращает объект: Existed (был ли каталог), Removed (исчез ли
+        полностью), Remaining (сколько файлов осталось).
+    #>
+    param([Parameter(Mandatory)] [string] $Path, [int] $Attempts = 3, [int] $DelayMs = 400)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{ Existed = $false; Removed = $true; Remaining = 0 }
+    }
+    for ($i = 1; $i -le $Attempts; $i++) {
+        Remove-DirQuiet $Path
+        if (-not (Test-Path -LiteralPath $Path)) { break }
+        if ($i -lt $Attempts) { Start-Sleep -Milliseconds $DelayMs }
+    }
+    $gone = -not (Test-Path -LiteralPath $Path)
+    $left = 0
+    if (-not $gone) {
+        $left = @(Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue).Count
+    }
+    return [pscustomobject]@{ Existed = $true; Removed = $gone; Remaining = $left }
+}
+
+# ─── Обновление поверх запущенного хоста ─────────────────────────────────
+#
+# Windows не даёт удалить или заменить файлы, которые использует работающий
+# процесс. При переустановке во время активного подключения это бьёт сразу
+# в двух местах: в _internal\ (DLL и .pyd native_host.exe) и в xray.exe.
+# Проверено на копии: Remove-Item -Recurse по _internal оставил 11 файлов из
+# 31 (13 не удалились), старый хост продолжал жить, а ЛЮБОЙ новый запуск —
+# а расширение запускает хост на каждый ping/stop/status — завершался без
+# ответа. Установка оказывалась испорчена до повторного запуска установщика.
+#
+# Поэтому: (1) останавливаем наши процессы, (2) новую версию сначала
+# целиком копируем рядом, (3) меняем местами быстрым переименованием. Если
+# что-то пошло не так до обмена — старая версия остаётся нетронутой.
+
+function Get-InstallProcesses {
+    <#
+        Процессы, запущенные ИЗ каталога установки.
+
+        Отбор строго по пути, а не по имени: у пользователя могут работать
+        другие xray (v2rayN, Nekoray, служба), их трогать нельзя. Путь чужих
+        процессов недоступен без прав — такие молча пропускаются.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $InstallDir,
+        [string[]] $Names = @('native_host', 'xray')
+    )
+    $dir = ([IO.Path]::GetFullPath($InstallDir)).TrimEnd('\') + '\'
+    foreach ($p in @(Get-Process -Name $Names -ErrorAction SilentlyContinue)) {
+        $path = $null
+        try { $path = $p.Path } catch { }
+        if ($path -and $path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) { $p }
+    }
+}
+
+function Stop-InstallProcesses {
+    <#
+        Останавливает процессы из каталога установки и ЖДЁТ, пока они реально
+        исчезнут: Stop-Process возвращается раньше, чем освобождаются файлы.
+        Возвращает список остановленных процессов (пустой — ничего не было).
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $InstallDir,
+        [string[]] $Names = @('native_host', 'xray'),
+        [int] $TimeoutSec = 8
+    )
+    $procs = @(Get-InstallProcesses -InstallDir $InstallDir -Names $Names)
+    if ($procs.Count -eq 0) { return @() }
+
+    foreach ($p in $procs) {
+        try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { }
+    }
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (@(Get-InstallProcesses -InstallDir $InstallDir -Names $Names).Count -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    return $procs
+}
+
+function Move-WithRetry {
+    # Переименование может на мгновение упереться в антивирус или индексатор,
+    # которые ещё держат только что освобождённые файлы.
+    param([string] $From, [string] $To, [bool] $IsDirectory, [int] $Attempts = 10, [int] $DelayMs = 300)
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            if ($IsDirectory) { [IO.Directory]::Move($From, $To) }
+            else { Move-Item -LiteralPath $From -Destination $To -Force -ErrorAction Stop }
+            return
+        } catch {
+            if ($i -eq $Attempts) { throw }
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+
+function Install-DirectoryAtomic {
+    <#
+        Заменяет каталог Target содержимым Source так, чтобы при любом сбое
+        до обмена Target остался прежним.
+
+        Порядок: копия в Target.new -> Target в Target.old -> Target.new в
+        Target -> удаление Target.old. Единственное «опасное» окно — между
+        двумя переименованиями, это миллисекунды, и при сбое второго первое
+        откатывается.
+    #>
+    param([Parameter(Mandatory)] [string] $Source, [Parameter(Mandatory)] [string] $Target)
+
+    $new = "$Target.new"
+    $old = "$Target.old"
+
+    # Остатки прошлого оборванного запуска. Если оборвало ровно между двумя
+    # переименованиями, Target отсутствует, а прежняя версия лежит в .old —
+    # возвращаем её, иначе потеряем рабочую установку.
+    if ((Test-Path -LiteralPath $old) -and -not (Test-Path -LiteralPath $Target)) {
+        Move-WithRetry -From $old -To $Target -IsDirectory $true
+    }
+    Remove-DirQuiet $new
+    Remove-DirQuiet $old
+
+    try {
+        Copy-Item -LiteralPath $Source -Destination $new -Recurse -Force -ErrorAction Stop
+    } catch {
+        Remove-DirQuiet $new
+        throw
+    }
+
+    if (Test-Path -LiteralPath $Target) {
+        try {
+            Move-WithRetry -From $Target -To $old -IsDirectory $true
+        } catch {
+            Remove-DirQuiet $new
+            throw "каталог занят и не может быть заменён ($Target): $($_.Exception.Message)"
+        }
+    }
+    try {
+        Move-WithRetry -From $new -To $Target -IsDirectory $true
+    } catch {
+        # Вернуть всё, как было: лучше старая версия, чем никакой.
+        if (Test-Path -LiteralPath $old) { try { Move-WithRetry -From $old -To $Target -IsDirectory $true } catch { } }
+        Remove-DirQuiet $new
+        throw
+    }
+    Remove-DirQuiet $old
+}
+
+function Install-FileAtomic {
+    <# То же для одного файла: копия рядом, затем перенос поверх прежнего. #>
+    param([Parameter(Mandatory)] [string] $Source, [Parameter(Mandatory)] [string] $Target)
+
+    $new = "$Target.new"
+    Remove-FileQuiet $new
+    try {
+        Copy-Item -LiteralPath $Source -Destination $new -Force -ErrorAction Stop
+        Move-WithRetry -From $new -To $Target -IsDirectory $false
+    } catch {
+        Remove-FileQuiet $new
+        throw
+    }
+}
+
+function Install-NativeHostExe {
+    <#
+        Ставит собранный native_host.exe (+ _internal\) в каталог установки,
+        в том числе поверх запущенного. Бросает исключение при неудаче; к
+        этому моменту прежняя версия либо на месте, либо уже заменена целиком.
+    #>
+    param([Parameter(Mandatory)] [string] $DistDir, [Parameter(Mandatory)] [string] $InstallDir)
+
+    $stopped = @(Stop-InstallProcesses -InstallDir $InstallDir)
+    if ($stopped.Count -gt 0) {
+        $names = ($stopped | ForEach-Object { $_.ProcessName } | Sort-Object -Unique) -join ', '
+        Write-Warn "Остановлено запущенное: $names — активное подключение разорвано, после установки подключитесь заново"
+    }
+    Install-DirectoryAtomic -Source "$DistDir\_internal" -Target "$InstallDir\_internal"
+    Install-FileAtomic -Source "$DistDir\native_host.exe" -Target "$InstallDir\native_host.exe"
+}
+
+function Install-XrayBinary {
+    <# Заменяет xray.exe, при необходимости остановив наш работающий xray. #>
+    param([Parameter(Mandatory)] [string] $Source, [Parameter(Mandatory)] [string] $InstallDir)
+
+    $stopped = @(Stop-InstallProcesses -InstallDir $InstallDir -Names @('xray'))
+    if ($stopped.Count -gt 0) {
+        Write-Warn "Остановлен работающий xray.exe — активное подключение разорвано, подключитесь заново"
+    }
+    Install-FileAtomic -Source $Source -Target "$InstallDir\xray.exe"
+}
+
 function Resolve-PythonExe {
     <#
         Ищет НАСТОЯЩИЙ интерпретатор.
@@ -201,6 +400,7 @@ function Install-XrayAndGeo {
     $installedVersion = Get-XrayVersion $xrayTarget
     $xrayMissing = -not (Test-Path $xrayTarget)
     $needXray = $xrayMissing
+    $replaceFailed = $false
 
     if (-not $needXray -and $installedVersion -and $LatestXrayVersion `
             -and $installedVersion -ne $LatestXrayVersion) {
@@ -220,14 +420,21 @@ function Install-XrayAndGeo {
             $cached -and $LatestXrayVersion -and $cached -eq $LatestXrayVersion
         }
         if ($cacheOk) {
-            Copy-Item "$ProjectDir\bin\xray.exe" $xrayTarget -Force
-            Write-Ok "xray.exe взят из bin\$(if ($cached) { " (v$cached)" })"
+            try {
+                Install-XrayBinary -Source "$ProjectDir\bin\xray.exe" -InstallDir $InstallDir
+                Write-Ok "xray.exe взят из bin\$(if ($cached) { " (v$cached)" })"
+            } catch {
+                # Качать заново бессмысленно: упёрлись не в отсутствие файла, а в
+                # невозможность его заменить.
+                Write-Fail "Не удалось заменить xray.exe: $($_.Exception.Message)"
+                $replaceFailed = $true
+            }
             $needXray = $false
         } else {
             Write-Host "  Кэш в bin\ не подходит$(if ($cached) { " (v$cached)" } else { ' (версия не читается)' }) — качаю" -ForegroundColor Gray
         }
     }
-    if (-not $needXray) {
+    if (-not $needXray -and -not $replaceFailed) {
         $v = Get-XrayVersion $xrayTarget
         Write-Ok "xray.exe установлен$(if ($v) { " (v$v)" })"
     }
@@ -274,8 +481,12 @@ function Install-XrayAndGeo {
 
         if ($needXray) {
             if (Test-Path "$tmp\xray.exe") {
-                Copy-Item "$tmp\xray.exe" $xrayTarget -Force
-                Write-Ok "xray.exe v$xrayVersion установлен"
+                try {
+                    Install-XrayBinary -Source "$tmp\xray.exe" -InstallDir $InstallDir
+                    Write-Ok "xray.exe v$xrayVersion установлен"
+                } catch {
+                    Write-Fail "Не удалось заменить xray.exe: $($_.Exception.Message)"
+                }
             } else {
                 Write-Fail "xray.exe не найден в архиве"
             }

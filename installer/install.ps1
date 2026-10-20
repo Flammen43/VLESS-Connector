@@ -65,13 +65,15 @@ if (-not (Test-Path $installDir)) { New-Item -ItemType Directory -Path $installD
 # откатиться, да и xray.exe/гео-базы/логи ниже общие для обеих сборок.
 $exeTarget = "$installDir\native_host.exe"
 try {
-    if (Test-Path "$installDir\_internal") { Remove-Item "$installDir\_internal" -Recurse -Force }
-    Copy-Item "$distSrc\_internal" "$installDir\_internal" -Recurse -Force
-    Copy-Item $exeSrc $exeTarget -Force
+    # Работает и поверх запущенного хоста: останавливает наши процессы и
+    # заменяет файлы целиком, а не по одному. Раньше Remove-Item по _internal\
+    # при активном подключении оставлял каталог наполовину пустым, и любой
+    # новый запуск хоста падал.
+    Install-NativeHostExe -DistDir $distSrc -InstallDir $installDir
     Write-Ok "native_host.exe + _internal\"
 } catch {
-    Write-Fail "Не удалось скопировать: $_"
-    Write-Host "       Если сейчас есть активное VPN-подключение — отключите его и повторите." -ForegroundColor Gray
+    Write-Fail "Не удалось установить хост: $($_.Exception.Message)"
+    Write-Host "       Прежняя версия осталась на месте. Закройте браузер и повторите." -ForegroundColor Gray
     Exit-Installer 1
 }
 

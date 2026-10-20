@@ -280,11 +280,26 @@ $targets = if ($Platform -eq 'all') { $XRAY_ASSETS.Keys | Sort-Object } else { @
 $made = @()
 foreach ($t in $targets) { $made += New-ReleaseArchive -Plat $t -Version $XrayVersion }
 
+# SHA256SUMS: формат sha256sum («хеш  имя»), чтобы проверялось и вручную
+# (`sha256sum -c SHA256SUMS`), и из web-install.*. Считаем по ВСЕМ архивам в
+# каталоге, а не только по собранным сейчас: файл прикладывается к релизу один
+# и должен покрывать все платформы. LF и без BOM — иначе `sha256sum -c` на
+# Linux споткнётся на первой строке.
+$sumLines = foreach ($zip in (Get-ChildItem $OutDir -Filter 'vlesschrome-*.zip' | Sort-Object Name)) {
+    "{0}  {1}" -f (Get-FileHash -Path $zip.FullName -Algorithm SHA256).Hash.ToLower(), $zip.Name
+}
+$sumsPath = Join-Path $OutDir 'SHA256SUMS'
+[System.IO.File]::WriteAllText($sumsPath, (($sumLines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " Собрано архивов: $($made.Count)" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 foreach ($m in $made) { Write-Host "  $m" -ForegroundColor Gray }
+Write-Host "  $sumsPath" -ForegroundColor Gray
+Write-Host ""
+Write-Host "К релизу на GitHub приложите ВСЕ архивы и SHA256SUMS: без него web-install" -ForegroundColor Yellow
+Write-Host "не сможет проверить целостность скачанного." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Установка у пользователя (без сети):" -ForegroundColor Yellow
 Write-Host "  Windows : распаковать -> installer\install.bat  (или install.bat)"
